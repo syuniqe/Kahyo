@@ -9,7 +9,7 @@ This is a working demo of the Narrative Storyline Mapping Model (NSMM). It costs
 | Hosting | GitHub Pages (static site, no server) |
 | Voice to text | Browser speech recognition (Chrome / Edge; English India, US, UK, Hindi) |
 | AI extraction, continuity checks, prose | Google Gemini free tier, with your own key stored only in your browser |
-| Embeddings | Gemini `gemini-embedding-001` free tier, or an offline fallback |
+| Embeddings | Gemini `gemini-embedding-001` free tier, or an offline fallback (text model defaults to `gemini-3.8-flash` and switches to the newest Flash automatically if Google retires it) |
 | Storage | Your browser (localStorage), plus JSON export / import |
 
 Without a key the app still works in **offline mode**: one Footstep per sentence, simple local embeddings, and an outline instead of prose.

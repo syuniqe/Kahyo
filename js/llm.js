@@ -5,6 +5,7 @@
   const BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
   const EMBED_MODEL = 'gemini-embedding-001';
   const EMBED_DIM = 768;
+  const DEFAULT_MODEL = 'gemini-3.8-flash';
 
   function settings() {
     try {
@@ -16,6 +17,47 @@
 
   function hasKey() {
     return Boolean(settings().apiKey);
+  }
+
+  function textModel() {
+    return settings().model || DEFAULT_MODEL;
+  }
+
+  // Google retires models for new users from time to time. When the saved
+  // model is refused, pick the newest Flash model this key can use, remember
+  // it, and let the caller retry.
+  async function pickNewestFlash() {
+    const { apiKey } = settings();
+    const res = await fetch(BASE.replace(/models\/$/, 'models?pageSize=200'), { headers: { 'x-goog-api-key': apiKey } });
+    if (!res.ok) return null;
+    const { models = [] } = await res.json();
+    const version = (name) => Number((name.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+    const best = models
+      .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map((m) => m.name.replace(/^models\//, ''))
+      .filter((n) => /^gemini-[\d.]+-flash$/.test(n))
+      .sort((a, b) => version(b) - version(a))[0];
+    if (best) {
+      try {
+        localStorage.setItem('kahyo.settings', JSON.stringify({ ...settings(), model: best }));
+      } catch {}
+    }
+    return best || null;
+  }
+
+  function isRetired(status, msg) {
+    return status === 404 || /no longer available|not found|is not supported|deprecated/i.test(msg);
+  }
+
+  async function generate(body) {
+    try {
+      return await call(textModel(), 'generateContent', body);
+    } catch (e) {
+      if (!isRetired(e.status, e.message)) throw e;
+      const next = await pickNewestFlash();
+      if (!next || next === e.model) throw e;
+      return call(next, 'generateContent', body);
+    }
   }
 
   async function call(model, method, body) {
@@ -33,18 +75,20 @@
         msg = err.error?.message || msg;
       } catch {}
       if (res.status === 429) msg = 'Free-tier rate limit reached. Wait a minute and try again. (' + msg + ')';
-      throw new Error(msg);
+      const err = new Error(msg);
+      err.status = res.status;
+      err.model = model;
+      throw err;
     }
     return res.json();
   }
 
   async function generateJSON(prompt, schemaHint) {
-    const model = settings().model || 'gemini-2.5-flash';
-    const data = await call(model, 'generateContent', {
+    const data = await generate({
       contents: [{ role: 'user', parts: [{ text: prompt + '\n\nReturn JSON only, matching:\n' + schemaHint }] }],
-      generationConfig: { responseMimeType: 'application/json', temperature: 0.3 },
+      generationConfig: { responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' } },
     });
-    const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '';
+    const text = data.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text).join('') || '';
     try {
       return JSON.parse(text);
     } catch {
@@ -55,12 +99,10 @@
   }
 
   async function generateText(prompt) {
-    const model = settings().model || 'gemini-2.5-flash';
-    const data = await call(model, 'generateContent', {
+    const data = await generate({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.8 },
     });
-    return data.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '';
+    return data.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text).join('') || '';
   }
 
   async function embed(texts) {
@@ -76,5 +118,5 @@
     return data.embeddings.map((e) => e.values);
   }
 
-  root.LLM = { settings, hasKey, generateJSON, generateText, embed, EMBED_DIM };
+  root.LLM = { settings, hasKey, generateJSON, generateText, embed, EMBED_DIM, DEFAULT_MODEL };
 })(window);

@@ -937,7 +937,7 @@ Writer's spoken fragment:
     $('#settings-btn').addEventListener('click', openSettings);
     $('#m-settings').addEventListener('click', openSettings);
     $('#settings-save').addEventListener('click', () => {
-      saveSettings({ apiKey: $('#api-key').value.trim(), model: $('#model').value.trim() || 'gemini-2.5-flash' });
+      saveSettings({ apiKey: $('#api-key').value.trim(), model: $('#model').value.trim() });
       $('#settings').close();
       run(async () => {
         await ensureEmbedder();
@@ -955,7 +955,7 @@ Writer's spoken fragment:
   function openSettings() {
     const s = LLM.settings();
     $('#api-key').value = s.apiKey || '';
-    $('#model').value = s.model || 'gemini-2.5-flash';
+    $('#model').value = s.model && !/gemini-2\./.test(s.model) ? s.model : '';
     $('#settings').showModal();
   }
 
