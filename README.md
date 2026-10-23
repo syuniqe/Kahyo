@@ -25,9 +25,11 @@ Without a key the app still works in **offline mode**: one Footstep per sentence
 3. For AI mode: **Settings** → get a free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) → paste → Save.
 4. Press **Speak**, think out loud, then **Add to Journey**. Ctrl/⌘ + Enter also adds.
 
-## Deploy on GitHub Pages (free)
+## Deploy (free)
 
-Repo **Settings → Pages → Build and deployment → Source: Deploy from a branch → `main` / `(root)` → Save**. The site appears at `https://<owner>.github.io/<repo>/` within a minute or two.
+**Private repo → Netlify.** Sign up at app.netlify.com with GitHub → *Add new site → Import an existing project → GitHub* → pick this repo → leave the build command empty, set the publish directory to `.` → *Deploy*. Every push to `main` redeploys automatically.
+
+**Public repo → GitHub Pages.** *Settings → Pages → Source: Deploy from a branch → `main` / `(root)` → Save.*
 
 ## How it maps to the NSMM docs
 
