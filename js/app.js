@@ -5,7 +5,7 @@
   const STORE_KEY = 'kahyo.journey';
   const EDGE_TYPES = {
     causal: { label: 'Causal', color: '#c9a84c' },
-    temporal: { label: 'Temporal', color: '#7a7a8e' },
+    temporal: { label: 'Story order', color: '#7a7a8e' },
     character_arc: { label: 'Character arc', color: '#6db3e0' },
     setup_resolution: { label: 'Setup → resolution', color: '#4a8c6a' },
     thematic: { label: 'Thematic', color: '#b07ad4' },
@@ -29,6 +29,7 @@
       characters: [],
       alerts: [],
       draft: '',
+      order: [],
       nextId: 1,
     };
   }
@@ -36,7 +37,9 @@
   function load() {
     try {
       const j = JSON.parse(localStorage.getItem(STORE_KEY));
-      return j && Array.isArray(j.footsteps) ? j : null;
+      if (!j || !Array.isArray(j.footsteps)) return null;
+      if (!Array.isArray(j.order)) j.order = j.footsteps.filter((f) => f.thread === 'main').map((f) => f.id);
+      return j;
     } catch {
       return null;
     }
@@ -65,6 +68,36 @@
 
   function fsById(id) {
     return journey.footsteps.find((f) => f.id === id);
+  }
+
+  // Story order of the main thread. The spine of the graph and the draft both
+  // follow it, so a new idea continues the story or slots in where it belongs.
+  function storyOrder() {
+    const main = new Set(journey.footsteps.filter((f) => f.thread === 'main').map((f) => f.id));
+    journey.order = (journey.order || []).filter((id) => main.has(id));
+    main.forEach((id) => {
+      if (!journey.order.includes(id)) journey.order.push(id);
+    });
+    return journey.order;
+  }
+
+  function mainInOrder() {
+    return storyOrder().map(fsById);
+  }
+
+  function placeInOrder(id, afterId) {
+    const order = storyOrder().filter((x) => x !== id);
+    const at = afterId === 'START' ? 0 : afterId && order.includes(afterId) ? order.indexOf(afterId) + 1 : order.length;
+    order.splice(at, 0, id);
+    journey.order = order;
+  }
+
+  function moveInOrder(id, delta) {
+    const order = storyOrder();
+    const i = order.indexOf(id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
   }
 
   function fsText(f) {
@@ -126,28 +159,31 @@
     "intent_signal": -1.0 to 1.0 (-1 = writer is exploring a what-if/tangent, 0 = neutral, +1 = converging toward climax/resolution),
     "seeds": [{"target": "existing id like FS#003, or NEW1/NEW2 for an earlier footstep in this same list", "type": "causal|temporal|character_arc|setup_resolution|thematic"}]
   }],
+  "place_after": "the existing main-thread id these new moments come right after in STORY time, START if they come before everything, or END if they simply continue the story",
   "new_traits": [{"character": "name", "trait": "a lasting behavioural rule the writer stated, e.g. 'never lies'"}],
   "violations": [{"footstep": "NEW1", "character": "name", "trait": "exact existing trait text", "severity": "soft|hard", "suggestion": "how the writer could fix or justify it"}]
 }`;
 
   function extractPrompt(transcript) {
-    const recent = journey.footsteps
-      .filter((f) => f.thread !== 'archived')
-      .slice(-40)
-      .map((f) => `${f.id} [${f.thread}]: ${f.event}`)
+    const recent = [
+      ...mainInOrder().map((f, i) => `${i + 1}. ${f.id}: ${f.event}`),
+      ...journey.footsteps.filter((f) => f.thread === 'branch').map((f) => `   (side branch) ${f.id}: ${f.event}`),
+    ]
+      .slice(-60)
       .join('\n');
     const traits = journey.characters
       .flatMap((c) => c.traits.filter((t) => t.level !== 'off').map((t) => `- ${c.name}: "${t.text}" (${t.level})`))
       .join('\n');
     return `You are the extraction layer of Kahyo, a voice-first storytelling system based on the Narrative Storyline Mapping Model (NSMM).
 A writer just spoke a fragment of their story out loud. Split it into Footsteps: atomic story moments, each one meaningful advancement. Usually 1-4 per fragment. Ignore filler ("um", "so basically").
-Link each new Footstep to earlier ones with typed seeds when there is a real relationship. Prefer linking to existing ids.
+Writers speak out of order. Decide where the new moments belong in the story's timeline and set place_after. Use END unless the writer signals otherwise (e.g. "before the king...", "earlier,", "at the start", "back in step 2"). Use the context of the story so far to understand pronouns and references.
+Link each new Footstep to earlier ones with typed seeds only when there is a real causal, character-arc, setup-resolution or thematic relationship. Story order is tracked separately, so do not add temporal seeds.
 Check every new Footstep against the character traits below. Report a violation only when a character clearly acts against a trait. Use "hard" for strict traits.
 Only report new_traits the writer explicitly states about a character's lasting nature.
 
 Journey: ${journey.title}
 Current stage: ${journey.stage}
-Existing Footsteps:
+Main thread in story order (oldest first):
 ${recent || '(none yet)'}
 
 Character traits:
@@ -168,7 +204,7 @@ Writer's spoken fragment:
     const skip = new Set(['The', 'Then', 'So', 'And', 'But', 'What', 'When', 'She', 'He', 'They', 'It', 'In', 'On', 'At', 'This', 'That', 'Her', 'His', 'I', 'We', 'Maybe', 'Just']);
     return {
       footsteps: sentences.map((s, i) => {
-        const caps = (s.match(/\b[A-Z][a-z]+\b/g) || []).filter((w) => !skip.has(w));
+        const caps = (s.slice(1).match(/\b[A-Z][a-z]+\b/g) || []).filter((w) => !skip.has(w));
         const subjects = [...new Set([...known.filter((k) => s.includes(k)), ...caps])].slice(0, 4);
         const exploring = /\b(what if|maybe|just exploring|thinking out loud|tangent|perhaps)\b/i.test(s);
         const converging = /\b(finally|climax|at last|in the end|realizes|realises|ending)\b/i.test(s);
@@ -180,9 +216,10 @@ Writer's spoken fragment:
           promises: [],
           world_rules: [],
           intent_signal: exploring ? -1 : converging ? 1 : 0,
-          seeds: i > 0 ? [{ target: 'NEW' + i, type: 'temporal' }] : [],
+          seeds: [],
         };
       }),
+      place_after: 'END',
       new_traits: [],
       violations: [],
     };
@@ -190,7 +227,7 @@ Writer's spoken fragment:
 
   // ---------- core pipeline ----------
 
-  async function addThought(transcript, preExtracted) {
+  async function addThought(transcript, preExtracted, placeAfter) {
     transcript = transcript.trim();
     if (!transcript) return;
     const extracted = preExtracted || (LLM.hasKey() ? await LLM.generateJSON(extractPrompt(transcript), EXTRACT_SCHEMA) : offlineExtract(transcript));
@@ -217,7 +254,9 @@ Writer's spoken fragment:
     };
 
     const vecs = await embedTexts(items.map(fsText));
-    const lastMain = [...journey.footsteps].reverse().find((f) => f.thread === 'main');
+    // Where the new moments go: the writer's pick, else the model's, else the end.
+    let anchor = placeAfter && placeAfter !== 'AUTO' ? placeAfter : String(extracted.place_after || 'END').trim();
+    if (anchor !== 'START' && !storyOrder().includes(anchor)) anchor = 'END';
 
     items.forEach((raw, i) => {
       const fs = {
@@ -236,21 +275,37 @@ Writer's spoken fragment:
         thread: 'main',
         violations: [],
       };
-      fs.subjects.forEach(ensureCharacter);
+      if (LLM.hasKey() || preExtracted) fs.subjects.forEach(ensureCharacter);
 
       const prior = journey.footsteps.filter((f) => f.thread === 'main');
       fs.metrics = NSMM.scoreFootstep(fs, prior, journey.stage, journey.threshold);
       journey.footsteps.push(fs);
 
-      const seeds = (raw.seeds || []).map((s) => ({ from: resolve(s.target), type: EDGE_TYPES[s.type] ? s.type : 'causal' })).filter((s) => s.from && s.from !== fs.id);
-      if (!seeds.length) {
-        const prev = i > 0 ? newIds[i - 1] : lastMain?.id;
-        if (prev) seeds.push({ from: prev, type: 'temporal' });
-      }
+      const seeds = (raw.seeds || [])
+        .map((s) => ({ from: resolve(s.target), type: EDGE_TYPES[s.type] ? s.type : 'causal' }))
+        .filter((s) => s.from && s.from !== fs.id && s.type !== 'temporal');
       seeds.forEach((s) => journey.edges.push({ from: s.from, to: fs.id, type: s.type }));
+
+      // Pruning waits until the Journey has a direction to measure against: not in
+      // Origin, not before three main moments, and offline (weak embeddings) only
+      // when the writer signals a what-if. An explicit what-if can branch any time.
+      const mainCount = storyOrder().length;
+      const reliable = LLM.hasKey() || Boolean(preExtracted);
+      const canBranch =
+        (fs.intent_signal < 0 && mainCount >= 1) || (reliable && journey.stage !== 'Origin' && mainCount >= 3);
+      fs.metrics.is_branch_candidate = fs.metrics.is_branch_candidate && canBranch;
 
       if (fs.metrics.is_branch_candidate) {
         fs.thread = 'branch';
+        // A branch hangs off the moment it grew from.
+        const root = anchor === 'END' ? storyOrder()[storyOrder().length - 1] : anchor === 'START' ? storyOrder()[0] : anchor;
+        if (!seeds.length && root) journey.edges.push({ from: root, to: fs.id, type: 'temporal' });
+      } else {
+        placeInOrder(fs.id, anchor);
+        anchor = fs.id;
+      }
+
+      if (fs.metrics.is_branch_candidate) {
         journey.alerts.unshift({
           id: 'a' + Date.now() + i,
           kind: 'terminancy',
@@ -323,7 +378,11 @@ Writer's spoken fragment:
     const a = journey.alerts.find((x) => x.id === alertId);
     if (!a) return;
     const fs = fsById(a.fsId);
-    if (action === 'keep' && fs) fs.thread = 'main';
+    if (action === 'keep' && fs) {
+      fs.thread = 'main';
+      const from = journey.edges.find((e) => e.to === fs.id && storyOrder().includes(e.from));
+      placeInOrder(fs.id, from ? from.from : 'END');
+    }
     if (action === 'archive' && fs) fs.thread = 'archived';
     if (action === 'relax') {
       const t = character(a.character)?.traits.find((x) => x.text === a.trait);
@@ -344,7 +403,7 @@ Writer's spoken fragment:
   // ---------- draft ----------
 
   async function renderDraft() {
-    const main = journey.footsteps.filter((f) => f.thread === 'main');
+    const main = mainInOrder();
     if (!main.length) return setStatus('Add some Footsteps first.', 'warn');
     if (!LLM.hasKey()) {
       journey.draft =
@@ -392,7 +451,7 @@ Writer's spoken fragment:
       const branch = f.thread === 'branch';
       return {
         id: f.id,
-        label: f.id + '\n' + (f.event.length > 34 ? f.event.slice(0, 32) + '…' : f.event),
+        label: f.id + '\n' + (f.event.length > 26 ? f.event.slice(0, 24) + '…' : f.event),
         title: f.event,
         value: 8 + 22 * ((f.metrics?.magnitude || 1) / maxMag),
         shape: 'dot',
@@ -407,7 +466,20 @@ Writer's spoken fragment:
       };
     });
     const ids = new Set(visible.map((f) => f.id));
-    const edges = journey.edges
+    const order = storyOrder();
+    const level = {};
+    order.forEach((id, i) => (level[id] = i));
+    // Story spine: consecutive main-thread moments, in story order.
+    const spine = order.slice(1).map((id, i) => ({ from: order[i], to: id, type: 'temporal' }));
+    const typed = journey.edges.filter((e) => !(e.type === 'temporal' && level[e.from] !== undefined && level[e.to] !== undefined));
+    // Branches sit one step to the right of the moment they grew from, off the spine.
+    visible.forEach((f) => {
+      if (level[f.id] !== undefined) return;
+      const src = journey.edges.find((e) => e.to === f.id && level[e.from] !== undefined);
+      level[f.id] = src ? level[src.from] + 1 : order.length;
+    });
+    nodes.forEach((n) => (n.level = level[n.id] ?? 0));
+    const edges = [...spine, ...typed]
       .filter((e) => ids.has(e.from) && ids.has(e.to))
       .map((e, i) => ({
         id: 'e' + i,
@@ -415,9 +487,10 @@ Writer's spoken fragment:
         to: e.to,
         arrows: 'to',
         color: { color: EDGE_TYPES[e.type]?.color || '#888', opacity: 0.85 },
-        dashes: e.type === 'thematic' || e.type === 'temporal',
+        dashes: e.type === 'thematic',
         title: EDGE_TYPES[e.type]?.label,
-        width: e.type === 'causal' || e.type === 'setup_resolution' ? 2 : 1.2,
+        width: e.type === 'temporal' ? 2.5 : e.type === 'causal' || e.type === 'setup_resolution' ? 2 : 1.2,
+        smooth: e.type === 'temporal' ? false : { type: 'curvedCW', roundness: 0.35 },
       }));
 
     if (typeof vis === 'undefined') {
@@ -427,10 +500,9 @@ Writer's spoken fragment:
     const data = { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) };
     if (!network) {
       network = new vis.Network($('#graph'), data, {
-        layout: { improvedLayout: true },
-        physics: { solver: 'forceAtlas2Based', forceAtlas2Based: { gravitationalConstant: -60, springLength: 120 }, stabilization: { iterations: 150 } },
+        layout: { hierarchical: { enabled: true, direction: 'LR', levelSeparation: 190, nodeSpacing: 130, sortMethod: 'directed', shakeTowards: 'roots' } },
+        physics: false,
         nodes: { scaling: { min: 8, max: 30, label: { enabled: false } } },
-        edges: { smooth: { type: 'dynamic' } },
         interaction: { hover: true, tooltipDelay: 150 },
       });
       network.on('click', (p) => {
@@ -439,7 +511,19 @@ Writer's spoken fragment:
     } else {
       network.setData(data);
     }
+    network.once('afterDrawing', () => network.fit({ animation: false }));
+    renderPlaceOptions();
     if (selectedId && ids.has(selectedId)) network.selectNodes([selectedId]);
+  }
+
+  function renderPlaceOptions() {
+    const sel = $('#place');
+    const keep = sel.value || 'AUTO';
+    const order = mainInOrder();
+    sel.innerHTML =
+      `<option value="AUTO">${LLM.hasKey() ? 'Let Kahyo decide' : 'At the end'}</option><option value="START">At the very start</option>` +
+      order.map((f, i) => `<option value="${esc(f.id)}">After ${i + 1}. ${esc(f.event.length > 40 ? f.event.slice(0, 38) + '…' : f.event)}</option>`).join('');
+    sel.value = [...sel.options].some((o) => o.value === keep) ? keep : 'AUTO';
   }
 
   function renderStats() {
@@ -552,6 +636,7 @@ Writer's spoken fragment:
       ${(f.violations || []).map((v) => `<div class="alert trait ${v.severity}"><div class="alert-title">Trait break · ${v.severity}</div><p>${esc(v.character)}: “${esc(v.trait)}”</p>${v.suggestion ? `<p class="suggest">${esc(v.suggestion)}</p>` : ''}</div>`).join('')}
       <details><summary>What the writer said</summary><p class="quote">${esc(f.transcript || '')}</p></details>
       <div class="actions">
+        ${f.thread === 'main' ? `<button data-place-after="${esc(f.id)}">Add next idea after this</button><button data-shift="-1" aria-label="Move earlier in the story">↑ Earlier</button><button data-shift="1" aria-label="Move later in the story">↓ Later</button>` : ''}
         ${f.thread !== 'main' ? `<button data-move="main">Move to main thread</button>` : `<button data-move="branch">Move to branch</button>`}
         <button data-move="archived">Archive</button>
       </div>`;
@@ -609,9 +694,6 @@ Writer's spoken fragment:
     renderDetail();
     if (network && fsById(id)?.thread !== 'archived') {
       network.selectNodes([id]);
-      try {
-        network.focus(id, { scale: 1, animation: { duration: 400 } });
-      } catch {}
     }
     showTab('footstep');
   }
@@ -723,8 +805,9 @@ Writer's spoken fragment:
         const text = $('#transcript').value;
         if (!text.trim()) return setStatus('Speak or type a story idea first.', 'warn');
         setStatus(LLM.hasKey() ? 'Structuring your thought into Footsteps…' : 'Structuring (offline mode)…');
-        await addThought(text);
+        await addThought(text, null, $('#place').value);
         $('#transcript').value = '';
+        $('#place').value = 'AUTO';
       })
     );
     $('#transcript').addEventListener('keydown', (e) => {
@@ -754,7 +837,7 @@ Writer's spoken fragment:
     document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
 
     document.body.addEventListener('click', (e) => {
-      const t = e.target.closest('[data-act],[data-goto],[data-move],#copy-draft,#dl-draft');
+      const t = e.target.closest('[data-act],[data-goto],[data-move],[data-shift],[data-place-after],#copy-draft,#dl-draft');
       if (!t) return;
       if (t.dataset.act) resolveAlert(t.dataset.a, t.dataset.act);
       else if (t.dataset.goto) {
@@ -768,6 +851,14 @@ Writer's spoken fragment:
           save();
           renderAll();
         }
+      } else if (t.dataset.shift) {
+        moveInOrder(selectedId, Number(t.dataset.shift));
+        save();
+        renderAll();
+      } else if (t.dataset.placeAfter) {
+        $('#place').value = t.dataset.placeAfter;
+        $('#transcript').focus();
+        setStatus('Your next idea will go right after ' + t.dataset.placeAfter + '. Speak or type it now.');
       } else if (t.id === 'copy-draft') {
         navigator.clipboard?.writeText(journey.draft).then(() => setStatus('Draft copied.', 'ok'));
       } else if (t.id === 'dl-draft') {
@@ -800,6 +891,9 @@ Writer's spoken fragment:
 
     // menu
     $('#menu-btn').addEventListener('click', () => $('#menu').toggleAttribute('hidden'));
+    $('#menu').addEventListener('click', (e) => {
+      if (e.target.closest('button')) $('#menu').hidden = true;
+    });
     document.addEventListener('click', (e) => {
       if (!e.target.closest('#menu, #menu-btn')) $('#menu').hidden = true;
     });

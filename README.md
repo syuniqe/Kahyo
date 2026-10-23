@@ -24,6 +24,7 @@ Without a key the app still works in **offline mode**: one Footstep per sentence
 2. **Menu → Load sample story** to see a finished Journey (*The Salt Road*) with one drifting branch and one trait break.
 3. For AI mode: **Settings** → get a free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) → paste → Save.
 4. Press **Speak**, think out loud, then **Add to Journey**. Ctrl/⌘ + Enter also adds.
+5. New ideas continue the story by default. To slot one in earlier, pick a spot in **Place it**, or select a Footstep and press **Add next idea after this**. With a Gemini key, Kahyo also works out the spot from what you say ("before the king...", "back at the start"). **↑ Earlier / ↓ Later** reorder a Footstep.
 
 ## Deploy (free)
 
@@ -44,6 +45,7 @@ Without a key the app still works in **offline mode**: one Footstep per sentence
 | Constitution angle: 0° aligned, 180° contradiction (≥150° triggers review) | gauge in the Footstep panel |
 | Trait levels: strict / moderate / flexible / off | Subjects & traits panel |
 | Decrumbing: branch candidates can be kept or archived | Alerts panel |
+| Branching is off in Origin and until 3 main Footsteps exist; offline, only an explicit what-if branches | `addThought` in `js/app.js` |
 | Journey Mapping rail: Origin → Pandiculation → Maxspan → Convergence → Climax | header rail and Stage selector |
 
 Two deliberate simplifications, noted in the code:
