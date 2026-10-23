@@ -4,7 +4,7 @@
   const $ = (sel) => document.querySelector(sel);
   const STORE_KEY = 'kahyo.journey';
   const EDGE_TYPES = {
-    causal: { label: 'Causal', color: '#c9a84c' },
+    causal: { label: 'Causal', color: '#FD3A0A' },
     temporal: { label: 'Story order', color: '#7a7a8e' },
     character_arc: { label: 'Character arc', color: '#6db3e0' },
     setup_resolution: { label: 'Setup → resolution', color: '#4a8c6a' },
@@ -456,9 +456,9 @@ Writer's spoken fragment:
         value: 8 + 22 * ((f.metrics?.magnitude || 1) / maxMag),
         shape: 'dot',
         color: {
-          background: branch ? '#3a2a12' : hasViolation ? '#3a1616' : '#1c1c30',
-          border: branch ? '#d4720a' : hasViolation ? '#e06464' : '#c9a84c',
-          highlight: { background: '#2a2a48', border: '#e8c96a' },
+          background: branch ? '#3a3012' : hasViolation ? '#3a1616' : '#1c1c30',
+          border: branch ? '#e8b547' : hasViolation ? '#e06464' : '#d9d2c2',
+          highlight: { background: '#2a1a16', border: '#FD3A0A' },
         },
         borderWidth: hasViolation || branch ? 3 : 2,
         shapeProperties: { borderDashes: branch ? [6, 4] : false },
@@ -648,7 +648,7 @@ Writer's spoken fragment:
     const rad = (a * Math.PI) / 180;
     const x = 60 + 46 * Math.cos(rad);
     const y = 56 - 46 * Math.sin(rad);
-    const color = a < 60 ? '#4a8c6a' : a < 120 ? '#d4720a' : '#e06464';
+    const color = a < 60 ? '#4a8c6a' : a < 120 ? '#e8b547' : '#e06464';
     return `<svg viewBox="0 0 120 64" class="gauge" role="img" aria-label="Direction angle ${a.toFixed(0)} degrees">
       <path d="M14 56 A46 46 0 0 1 106 56" fill="none" stroke="var(--border2-solid)" stroke-width="8" stroke-linecap="round"/>
       <line x1="60" y1="56" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>
