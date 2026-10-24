@@ -1396,10 +1396,39 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
 
   // ---------- events ----------
 
+  // Loader: draws the logo's strokes one after another like a pen, holds the
+  // finished mark for a moment, then starts again while Kahyo is working.
+  let scribbleFrame = null;
+  function scribble(on) {
+    cancelAnimationFrame(scribbleFrame);
+    const paths = [...document.querySelectorAll('.scribble path')];
+    if (!on || !paths.length) return;
+    const lens = paths.map((p) => p.getTotalLength());
+    const total = lens.reduce((a, b) => a + b, 0);
+    paths.forEach((p, i) => (p.style.strokeDasharray = lens[i] + ' ' + lens[i]));
+    const DRAW = 2200;
+    const HOLD = 600;
+    const t0 = performance.now();
+    const tick = (now) => {
+      const t = (now - t0) % (DRAW + HOLD);
+      let ink = (Math.min(t, DRAW) / DRAW) * total;
+      const svg = paths[0].ownerSVGElement;
+      svg.style.opacity = t > DRAW + HOLD * 0.6 ? String(1 - (t - DRAW - HOLD * 0.6) / (HOLD * 0.4)) : '1';
+      paths.forEach((p, i) => {
+        const drawn = Math.max(0, Math.min(lens[i], ink));
+        ink -= lens[i];
+        p.style.strokeDashoffset = String(lens[i] - drawn);
+      });
+      scribbleFrame = requestAnimationFrame(tick);
+    };
+    scribbleFrame = requestAnimationFrame(tick);
+  }
+
   async function run(fn) {
     if (busy) return;
     busy = true;
     document.body.classList.add('busy');
+    scribble(true);
     try {
       await fn();
     } catch (e) {
@@ -1408,6 +1437,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
     } finally {
       busy = false;
       document.body.classList.remove('busy');
+      scribble(false);
     }
   }
 

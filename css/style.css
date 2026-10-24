@@ -150,15 +150,10 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: var(--h
 .menu button:hover { background: var(--card2); }
 body.view-home .journey-only { display: none; }
 
-/* busy: the logo draws itself, loop by loop, then fills in (top right of the graph) */
-.scribble { width: 44px; height: 54px; visibility: hidden; flex: none; }
-.scribble .ink-lines path { fill: none; stroke: var(--brand); stroke-width: 9; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; }
-.scribble .ink-fill { fill: var(--brand); opacity: 0; }
+/* busy: the logo is scribbled stroke by stroke, like a pen (driven from app.js) */
+.scribble { width: 100px; height: 120px; visibility: hidden; flex: none; }
+.scribble path { fill: none; stroke: var(--brand); stroke-width: 26; stroke-linecap: round; stroke-linejoin: round; }
 body.busy .scribble { visibility: visible; }
-body.busy .scribble .ink-lines path { animation: ink 2.6s ease-in-out infinite; animation-delay: calc(var(--i) * 0.035s); }
-body.busy .scribble .ink-fill { animation: inkfill 2.6s ease-in-out infinite; }
-@keyframes ink { 0% { stroke-dashoffset: 1; } 50%, 85% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
-@keyframes inkfill { 0%, 55% { opacity: 0; } 70%, 85% { opacity: 1; } 100% { opacity: 0; } }
 
 /* home */
 .home { flex: 1; overflow: auto; padding: 56px max(28px, calc((100vw - 1100px) / 2)); }
@@ -421,5 +416,5 @@ dialog .actions { justify-content: flex-end; margin-top: 16px; }
   .stats { gap: 10px; }
   .home { padding: 20px 16px; }
 }
-.graph-head .scribble { order: 2; margin: -10px 0 -14px; }
+.graph-head .scribble { order: 2; margin: -16px -4px -66px 0; position: relative; z-index: 2; }
 .graph-head .stats { order: 3; flex-basis: 100%; }
