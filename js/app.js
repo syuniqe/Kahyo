@@ -1727,10 +1727,6 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
         .join('') +
       '<span><i class="ring branch"></i>Branch</span><span><i class="ring heavy"></i>Heavy, split it</span><span><i class="ring broken"></i>Trait break</span>';
     if (!SR) $('#mic-note').textContent = 'Voice needs Chrome or Edge. Typing works everywhere.';
-    // The same scribble also draws itself over the graph while Kahyo works.
-    const big = $('.scribble').cloneNode(true);
-    big.classList.add('big');
-    $('.graph-wrap').appendChild(big);
     bind();
     route();
     document.fonts?.ready.then(() => journey && renderGraph());

@@ -151,7 +151,7 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: var(--h
 body.view-home .journey-only { display: none; }
 
 /* busy: the logo scribbles itself, loop by loop */
-.scribble { width: 26px; height: 26px; display: none; overflow: visible; }
+.scribble { width: 30px; height: 30px; display: none; overflow: visible; margin-left: -4px; }
 .scribble ellipse { fill: none; stroke: var(--brand); stroke-width: 7; stroke-linecap: round; stroke-dasharray: 240; stroke-dashoffset: 240; animation: scribble 1.8s ease-in-out infinite; }
 .scribble ellipse:nth-child(2) { animation-delay: 0.18s; }
 .scribble ellipse:nth-child(3) { animation-delay: 0.36s; }
