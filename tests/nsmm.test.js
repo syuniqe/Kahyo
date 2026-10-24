@@ -45,3 +45,27 @@ test('local embeddings are unit length and similar for similar text', () => {
   assert.ok(Math.abs(Math.hypot(...a) - 1) < 1e-9);
   assert.ok(N.cosine(a, b) > N.cosine(a, c));
 });
+
+test('no stage labels before 12 footsteps', () => {
+  assert.deepStrictEqual(N.heuristicStages(11), new Array(11).fill(null));
+  const s = N.heuristicStages(12, 60);
+  assert.strictEqual(s[0], 'Origin');
+  assert.ok(!s.includes('Climax'));
+});
+
+test('stages run through all five over the planned length', () => {
+  const s = N.heuristicStages(20, 20);
+  assert.strictEqual(s[0], 'Origin');
+  assert.strictEqual(s[19], 'Climax');
+  assert.deepStrictEqual(N.monotonicStages(s), s);
+});
+
+test('monotonic stages never step back', () => {
+  assert.deepStrictEqual(N.monotonicStages(['Origin', 'Maxspan', 'Pandiculation']), ['Origin', 'Maxspan', 'Maxspan']);
+});
+
+test('data amount grows with words and items', () => {
+  const small = N.dataAmount({ event: 'Meera lies', subjects: ['Meera'] });
+  const big = N.dataAmount({ event: 'Meera lies to Arjun about the Collector at night', context: 'home', subjects: ['Meera', 'Arjun'], promises: ['x'] });
+  assert.ok(big > small);
+});

@@ -5,104 +5,148 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Kahyo — voice-first storytelling</title>
   <meta name="description" content="Speak your story. Kahyo structures it into a living Journey graph and guards its continuity." />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%230a0a0f' stroke='%23c9a84c' stroke-width='2'/><text x='16' y='22' text-anchor='middle' font-family='Georgia' font-size='17' fill='%23c9a84c'>K</text></svg>" />
+  <link rel="icon" type="image/png" href="assets/kahyo-mark-256.png" />
+  <link rel="apple-touch-icon" href="assets/kahyo-mark-256.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@300..700&display=swap" />
+  <script>
+    // Apply the saved theme before first paint, else follow the system setting.
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('kahyo.theme'); } catch (e) {}
+      if (t !== 'light' && t !== 'dark') t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
   <link rel="stylesheet" href="css/style.css" />
 </head>
-<body>
+<body class="view-home">
   <header class="top">
-    <div class="brand"><img src="assets/kahyo-wordmark-light.png" alt="Kahyo" /></div>
-    <input id="journey-title" class="title-input" aria-label="Journey title" />
-    <label class="stage">Stage <select id="stage" aria-label="Journey stage"></select></label>
+    <a class="brand" href="#/" aria-label="Kahyo home"><img class="logo-light" src="assets/kahyo-wordmark.png" alt="Kahyo" /><img class="logo-dark" src="assets/kahyo-wordmark-light.png" alt="Kahyo" /></a>
+    <img class="spinner" src="assets/kahyo-mark-256.png" alt="" aria-hidden="true" />
+    <a class="ghost-link journey-only" href="#/">← Journeys</a>
+    <input id="journey-title" class="title-input journey-only" aria-label="Journey title" />
+    <span class="spacer"></span>
     <span id="mode-badge" class="badge"></span>
+    <button id="theme-btn" class="ghost theme-btn" aria-label="Switch light or dark mode" title="Light / dark"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2v16a8 8 0 0 1 0-16z"/></svg></button>
     <button id="settings-btn" class="ghost">Settings</button>
-    <button id="menu-btn" class="ghost" aria-haspopup="true">Menu ▾</button>
+    <button id="menu-btn" class="ghost journey-only" aria-haspopup="true">Menu ▾</button>
     <div id="menu" class="menu" hidden>
-      <button id="m-sample">Load sample story</button>
-      <button id="m-new">New Journey</button>
       <button id="m-export">Export Journey (.json)</button>
-      <button id="m-import">Import Journey</button>
+      <button id="m-delete">Delete this Journey</button>
       <button id="m-settings">Settings</button>
     </div>
     <input id="import-file" type="file" accept=".json,application/json" hidden />
   </header>
 
-  <ol id="rail" class="rail" aria-label="Journey mapping"></ol>
-
-  <main class="layout">
-    <section class="col left">
-      <div class="card speak">
-        <h2>Speak your story</h2>
-        <button id="mic" class="mic" aria-label="Start or stop voice input">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" fill="currentColor"/></svg>
-          <span id="mic-label">Speak</span>
-        </button>
-        <div class="row">
-          <label class="small">Language
-            <select id="lang">
-              <option value="en-IN">English (India)</option>
-              <option value="en-US">English (US)</option>
-              <option value="en-GB">English (UK)</option>
-              <option value="hi-IN">हिन्दी</option>
-            </select>
-          </label>
-          <span id="mic-note" class="small muted"></span>
-        </div>
-        <textarea id="transcript" rows="6" placeholder="Speak, or type here. Think out loud: “So Meera finds out the Collector lied, and what if she…”"></textarea>
-        <label class="place small">Place it <select id="place" aria-label="Where this idea goes in the story"></select></label>
-        <button id="add" class="primary">Add to Journey</button>
-        <p id="status" class="status" role="status" aria-live="polite"></p>
+  <!-- Home: every Journey saved in this browser -->
+  <main id="home" class="home">
+    <div class="home-head">
+      <div>
+        <h1>Your Journeys</h1>
+        <p class="muted">Saved in this browser. Each Journey is one story, planned around 50 to 100 Footsteps.</p>
       </div>
-
-      <div class="card">
-        <h2>Subjects &amp; traits</h2>
-        <div id="characters"></div>
-        <form id="add-char" class="add-char"><input placeholder="Add a character" aria-label="New character name" /></form>
+      <div class="actions">
+        <button id="h-import" class="ghost">Import</button>
+        <button id="h-sample" class="ghost">Try the sample story</button>
+        <button id="h-new" class="primary">New Journey</button>
       </div>
-    </section>
+    </div>
+    <div id="journey-list" class="journey-list"></div>
+  </main>
 
-    <section class="col center">
-      <div class="card graph-card">
-        <div class="graph-head">
-          <h2>Journey graph</h2>
-          <div id="stats" class="stats"></div>
+  <!-- Journey view -->
+  <div id="journey-view" class="journey-view" hidden>
+    <div class="railbar">
+      <ol id="rail" class="rail" aria-label="Journey mapping"></ol>
+      <label class="planned small">Planned length <input id="planned" type="number" min="12" max="300" step="1" /> Footsteps</label>
+    </div>
+
+    <main class="layout">
+      <section class="col left">
+        <div class="card speak">
+          <h2>Speak your story</h2>
+          <button id="mic" class="mic" aria-label="Start or stop voice input">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" fill="currentColor"/></svg>
+            <span id="mic-label">Speak</span>
+          </button>
+          <div class="row">
+            <label class="small">Language
+              <select id="lang">
+                <option value="en-IN">English (India)</option>
+                <option value="en-US">English (US)</option>
+                <option value="en-GB">English (UK)</option>
+                <option value="hi-IN">हिन्दी</option>
+              </select>
+            </label>
+            <span id="mic-note" class="small muted"></span>
+          </div>
+          <textarea id="transcript" rows="5" placeholder="Speak, or type here. Fix any words the mic got wrong before you add it."></textarea>
+          <label class="place small">Place it <select id="place" aria-label="Where this idea goes in the story"></select></label>
+          <button id="add" class="primary">Add to Journey</button>
+          <p id="status" class="status" role="status" aria-live="polite"></p>
         </div>
-        <div class="graph-wrap">
-          <div id="graph"></div>
-          <div id="graph-empty" class="graph-empty">
-            <p>Your Journey is empty.</p>
-            <p class="muted">Press <strong>Speak</strong>, or load the sample story from the menu.</p>
+
+        <div class="card people">
+          <div id="characters"></div>
+        </div>
+      </section>
+
+      <section class="col center">
+        <div class="card graph-card">
+          <div class="graph-head">
+            <h2>Journey graph</h2>
+            <div id="stats" class="stats"></div>
+          </div>
+          <div class="graph-wrap">
+            <div id="graph"></div>
+            <div id="graph-empty" class="graph-empty">
+              <img src="assets/kahyo-mark-256.png" alt="" />
+              <p>Your Journey is empty.</p>
+              <p class="muted">Press <strong>Speak</strong> and tell your story the way you think it.</p>
+            </div>
+            <div class="graph-tools">
+              <button id="fit" class="ghost small" title="Fit the whole Journey">Fit</button>
+            </div>
+          </div>
+          <div class="graph-foot">
+            <div id="legend" class="legend"></div>
+            <label class="threshold small">Terminancy threshold
+              <input id="threshold" type="range" min="0.1" max="1" step="0.05" />
+              <span id="threshold-val"></span>
+            </label>
           </div>
         </div>
-        <div class="graph-foot">
-          <div id="legend" class="legend"></div>
-          <label class="threshold small">Terminancy threshold
-            <input id="threshold" type="range" min="0.1" max="1" step="0.05" />
-            <span id="threshold-val"></span>
-          </label>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="col right">
-      <div class="card tabs-card">
-        <div class="tabs" role="tablist">
-          <button class="tab active" data-tab="alerts" role="tab">Alerts <span id="alert-count"></span></button>
-          <button class="tab" data-tab="footstep" role="tab">Footstep</button>
-          <button class="tab" data-tab="draft" role="tab">Draft</button>
+      <section class="col right">
+        <div class="card tabs-card">
+          <div class="tabs" role="tablist">
+            <button class="tab active" data-tab="footstep" role="tab">Footstep</button>
+            <button class="tab" data-tab="alerts" role="tab">Alerts <span id="alert-count"></span></button>
+            <button class="tab" data-tab="draft" role="tab">Draft</button>
+          </div>
+          <div id="panel-footstep" class="tab-panel"><div id="detail"></div></div>
+          <div id="panel-alerts" class="tab-panel" hidden><div id="alerts"></div></div>
+          <div id="panel-draft" class="tab-panel" hidden>
+            <p class="muted small">A helper draft built from every Footstep, to get you moving. It is a scaffold for your own writing, not a replacement for it.</p>
+            <button id="render" class="primary">Build helper draft</button>
+            <div id="draft"></div>
+          </div>
         </div>
-        <div id="panel-alerts" class="tab-panel"><div id="alerts"></div></div>
-        <div id="panel-footstep" class="tab-panel" hidden><div id="detail"></div></div>
-        <div id="panel-draft" class="tab-panel" hidden>
-          <button id="render" class="primary">Render draft</button>
-          <div id="draft"></div>
+
+        <div class="card modifier">
+          <h2>Footstep modifier</h2>
+          <div id="modifier"></div>
         </div>
-      </div>
-    </section>
-  </main>
+      </section>
+    </main>
+  </div>
 
   <dialog id="settings">
     <h2>Settings</h2>
-    <p>Kahyo runs free. Without a key it works in <strong>offline mode</strong>: one Footstep per sentence and simple local embeddings. For AI extraction, continuity checks and prose drafts, add a free Google Gemini key.</p>
+    <p>Kahyo runs free. Without a key it works in <strong>offline mode</strong>: one Footstep per sentence and simple local embeddings. For AI extraction, placement, stage labels and drafts, add a free Google Gemini key.</p>
     <ol class="small">
       <li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> and sign in with Google.</li>
       <li>Create an API key (free, no card).</li>

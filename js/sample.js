@@ -3,11 +3,11 @@
 
 window.KAHYO_SAMPLE = {
   title: 'The Salt Road',
-  stage: 'Pandiculation',
+  plannedLength: 16,
   characters: [
-    { name: 'Meera', traits: [{ text: 'Never lies to her brother Arjun', level: 'strict' }] },
-    { name: 'Arjun', traits: [{ text: 'Afraid of the open sea', level: 'moderate' }] },
-    { name: 'Collector Hale', traits: [{ text: 'Values order over people', level: 'moderate' }] },
+    { name: 'Meera', physical: ['Sun-darkened hands cracked from salt', 'Thin, wiry frame'], traits: [{ text: 'Never lies to her brother Arjun', level: 'strict' }] },
+    { name: 'Arjun', physical: ['Tall, with a limp from an old injury'], traits: [{ text: 'Afraid of the open sea', level: 'moderate' }] },
+    { name: 'Collector Hale', physical: ['Heavy-set, red-faced in the heat', 'Always in a starched white collar'], traits: [{ text: 'Values order over people', level: 'moderate' }] },
   ],
   thoughts: [
     {
@@ -121,6 +121,90 @@ window.KAHYO_SAMPLE = {
     },
     {
       transcript:
+        'Arjun finds the Collector\'s seal on a letter in Meera\'s things and realises she went to Hale. He stops speaking to her.',
+      footsteps: [
+        {
+          event: 'Arjun finds Hale\'s sealed letter among Meera\'s things and learns she lied',
+          subjects: ['Arjun', 'Meera'],
+          context: 'Their hut, the next morning',
+          plot_intensity: 0.7,
+          promises: ['Meera must win back Arjun\'s trust'],
+          world_rules: [],
+          intent_signal: 0.5,
+          seeds: [{ target: 'FS#007', type: 'setup_resolution' }],
+        },
+      ],
+    },
+    {
+      transcript:
+        'Meanwhile the march gets closer. Hale arrests the two village elders who organised it, hoping the rest will give up.',
+      footsteps: [
+        {
+          event: 'Hale arrests the two village elders who organised the march',
+          subjects: ['Collector Hale'],
+          context: 'Soldiers come at night with lanterns',
+          plot_intensity: 0.8,
+          promises: ['The village must decide whether to carry on without its leaders'],
+          world_rules: [],
+          intent_signal: 0.6,
+          seeds: [{ target: 'FS#004', type: 'causal' }],
+        },
+        {
+          event: 'Meera confesses the deal to Arjun and asks him to help free the elders',
+          subjects: ['Meera', 'Arjun'],
+          context: 'On the shore, at low tide',
+          plot_intensity: 0.8,
+          promises: [],
+          world_rules: [],
+          intent_signal: 0.7,
+          seeds: [{ target: 'NEW1', type: 'causal' }, { target: 'FS#008', type: 'character_arc' }],
+        },
+      ],
+    },
+    {
+      transcript:
+        'Arjun, who is terrified of the sea, takes a boat across the creek at night to warn the marchers that soldiers are waiting.',
+      footsteps: [
+        {
+          event: 'Arjun crosses the creek by boat at night, despite his fear of the sea, to warn the marchers',
+          subjects: ['Arjun'],
+          context: 'A moonless night on the tidal creek',
+          plot_intensity: 0.8,
+          promises: ['The marchers will come prepared'],
+          world_rules: [],
+          intent_signal: 0.8,
+          seeds: [{ target: 'FS#010', type: 'causal' }],
+        },
+      ],
+    },
+    {
+      transcript:
+        'The women of the village gather salt in secret before dawn, filling clay pots to carry to the march.',
+      footsteps: [
+        {
+          event: 'The village women gather salt in secret before dawn to carry to the march',
+          subjects: ['Meera'],
+          context: 'The salt pans in the dark before dawn',
+          plot_intensity: 0.7,
+          promises: [],
+          world_rules: [],
+          intent_signal: 0.8,
+          seeds: [{ target: 'FS#003', type: 'thematic' }],
+        },
+        {
+          event: 'The march arrives at the village and thousands gather on the shore',
+          subjects: ['Meera', 'Arjun'],
+          context: 'Morning, drums and singing on the coast road',
+          plot_intensity: 0.9,
+          promises: [],
+          world_rules: [],
+          intent_signal: 0.9,
+          seeds: [{ target: 'FS#011', type: 'causal' }],
+        },
+      ],
+    },
+    {
+      transcript:
         'Then the climax: the march reaches the coast, Meera refuses Hale and leads the village onto the salt pans to make salt in front of the soldiers.',
       footsteps: [
         {
@@ -135,6 +219,22 @@ window.KAHYO_SAMPLE = {
             { target: 'FS#005', type: 'setup_resolution' },
             { target: 'FS#004', type: 'causal' },
           ],
+        },
+      ],
+    },
+    {
+      transcript:
+        'After it is over, Hale is recalled, the elders are freed, and Meera and Arjun stand on the pans as the first free salt dries.',
+      footsteps: [
+        {
+          event: 'Hale is recalled, the elders are freed, and Meera and Arjun watch the first free salt dry',
+          subjects: ['Meera', 'Arjun', 'Collector Hale'],
+          context: 'Weeks later, the salt pans at sunset',
+          plot_intensity: 0.6,
+          promises: [],
+          world_rules: [],
+          intent_signal: 1,
+          seeds: [{ target: 'FS#014', type: 'causal' }],
         },
       ],
     },

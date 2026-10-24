@@ -17,6 +17,13 @@
 
   const DEFAULT_THRESHOLD = 0.35;
 
+  // Stages are only labelled once the Journey has enough shape to judge.
+  const STAGE_LABEL_AFTER = 12;
+  const DEFAULT_PLANNED_LENGTH = 60;
+
+  // A Footstep carrying more than this much data probably holds two moments.
+  const SPLIT_AT = 60;
+
   function dot(a, b) {
     let s = 0;
     for (let i = 0; i < a.length; i++) s += a[i] * b[i];
@@ -154,8 +161,46 @@
     return v.map((x) => x / n);
   }
 
+  // How much a Footstep carries: words of event and context, plus each named
+  // subject, promise and world rule (weighted as a few words each).
+  function dataAmount(fs) {
+    const words = [fs.event, fs.context].filter(Boolean).join(' ').split(/\s+/).filter(Boolean).length;
+    const items = (fs.subjects?.length ?? 0) + (fs.promises?.length ?? 0) + (fs.world_rules?.length ?? 0);
+    return words + 3 * items;
+  }
+
+  // Heuristic stage labels by position in the planned Journey, used offline
+  // and between AI relabels. Fractions of the planned length:
+  // Origin < 12%, Pandiculation < 40%, Maxspan < 70%, Convergence < 90%, Climax.
+  const STAGE_BOUNDS = [0.12, 0.4, 0.7, 0.9];
+  function heuristicStages(count, plannedLength = DEFAULT_PLANNED_LENGTH) {
+    if (count < STAGE_LABEL_AFTER) return new Array(count).fill(null);
+    const span = Math.max(count, plannedLength);
+    return Array.from({ length: count }, (_, i) => {
+      const f = (i + 0.5) / span;
+      const idx = STAGE_BOUNDS.findIndex((b) => f < b);
+      return STAGES[idx === -1 ? STAGES.length - 1 : idx];
+    });
+  }
+
+  // Keeps stage labels in story order: a stage never goes back to an earlier one.
+  function monotonicStages(labels) {
+    let best = 0;
+    return labels.map((s) => {
+      const i = STAGES.indexOf(s);
+      if (i > best) best = i;
+      return STAGES[best];
+    });
+  }
+
   const api = {
     STAGES,
+    STAGE_LABEL_AFTER,
+    DEFAULT_PLANNED_LENGTH,
+    SPLIT_AT,
+    dataAmount,
+    heuristicStages,
+    monotonicStages,
     STAGE_MULTIPLIER,
     DEFAULT_THRESHOLD,
     cosine,

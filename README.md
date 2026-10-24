@@ -71,3 +71,12 @@ tests/              node --test tests/nsmm.test.js
 ## Privacy
 
 Your Journey and API key stay in your browser. When a key is set, transcripts are sent to Google's Gemini API for processing. On the free tier, Google may use that data to improve its products, so don't paste anything confidential.
+
+## Journey view (v2)
+
+- **Home** lists every Journey saved in this browser (no sign-in yet: accounts need the Phase 4 backend).
+- **Graph geometry**: each line's angle is the Footstep's direction (up = toward the story's intent, flat = neutral, down = away, max ±60°), its length is the magnitude, and a circle's size is how much data the Footstep holds. Above 60 data points Kahyo suggests splitting it in two.
+- **Stages** are not labelled until 12 main Footsteps. Then Gemini reads the whole Journey and labels each moment (every 3 new Footsteps); offline, labels follow position within the planned length.
+- **Left pane**: speak and correct, then a character list (recurrence %, traits with strictness, physical features picked from the story).
+- **Right pane**: Footstep (five editable parameters), Alerts, helper Draft; below it the Footstep modifier with Intent Vector sliders and ranges.
+- **Theme**: light (white and greys, deep purple) and dark (deep violet, yellow), Fredoka type, flat pill buttons.
