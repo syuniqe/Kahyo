@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="assets/kahyo-mark-256.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@300..700&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..600&family=Manrope:wght@400;500;600;700&display=swap" />
   <script>
     // Apply the saved theme before first paint, else follow the system setting.
     (function () {
@@ -24,7 +24,13 @@
 <body class="view-home">
   <header class="top">
     <a class="brand" href="#/" aria-label="Kahyo home"><img class="logo-light" src="assets/kahyo-wordmark.png" alt="Kahyo" /><img class="logo-dark" src="assets/kahyo-wordmark-light.png" alt="Kahyo" /></a>
-    <img class="spinner" src="assets/kahyo-mark-256.png" alt="" aria-hidden="true" />
+    <svg class="scribble" viewBox="-60 -60 120 120" aria-hidden="true">
+      <ellipse rx="50" ry="20" transform="rotate(10)" />
+      <ellipse rx="46" ry="22" transform="rotate(62)" />
+      <ellipse rx="52" ry="18" transform="rotate(118)" />
+      <ellipse rx="44" ry="24" transform="rotate(160)" />
+      <ellipse rx="48" ry="16" transform="rotate(-38)" />
+    </svg>
     <a class="ghost-link journey-only" href="#/">← Journeys</a>
     <input id="journey-title" class="title-input journey-only" aria-label="Journey title" />
     <span class="spacer"></span>
@@ -58,15 +64,10 @@
 
   <!-- Journey view -->
   <div id="journey-view" class="journey-view" hidden>
-    <div class="railbar">
-      <ol id="rail" class="rail" aria-label="Journey mapping"></ol>
-      <label class="planned small">Planned length <input id="planned" type="number" min="12" max="300" step="1" /> Footsteps</label>
-    </div>
-
     <main class="layout">
       <section class="col left">
         <div class="card speak">
-          <h2>Speak your story</h2>
+          <h2>Think out loud</h2>
           <button id="mic" class="mic" aria-label="Start or stop voice input">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" fill="currentColor"/></svg>
             <span id="mic-label">Speak</span>
@@ -82,14 +83,21 @@
             </label>
             <span id="mic-note" class="small muted"></span>
           </div>
-          <textarea id="transcript" rows="5" placeholder="Speak, or type here. Fix any words the mic got wrong before you add it."></textarea>
+           <textarea id="transcript" rows="8" placeholder="Speak, or type here. Fix any words the mic got wrong before you add it."></textarea>
           <label class="place small">Place it <select id="place" aria-label="Where this idea goes in the story"></select></label>
           <button id="add" class="primary">Add to Journey</button>
           <p id="status" class="status" role="status" aria-live="polite"></p>
         </div>
 
-        <div class="card people">
-          <div id="characters"></div>
+        <div class="char-dock">
+          <div id="char-pop" class="char-pop card" hidden>
+            <div id="characters"></div>
+          </div>
+          <button id="char-toggle" class="char-bar" aria-expanded="false" aria-controls="char-pop">
+            <span class="char-bar-title">Characters <span id="char-count" class="muted"></span></span>
+            <span id="char-faces" class="faces"></span>
+            <span class="chev" aria-hidden="true">▴</span>
+          </button>
         </div>
       </section>
 
@@ -97,6 +105,10 @@
         <div class="card graph-card">
           <div class="graph-head">
             <h2>Journey graph</h2>
+            <label class="threshold small">Terminancy threshold
+              <input id="threshold" type="range" min="0.1" max="1" step="0.05" />
+              <span id="threshold-val"></span>
+            </label>
             <div id="stats" class="stats"></div>
           </div>
           <div class="graph-wrap">
@@ -111,11 +123,9 @@
             </div>
           </div>
           <div class="graph-foot">
-            <div id="legend" class="legend"></div>
-            <label class="threshold small">Terminancy threshold
-              <input id="threshold" type="range" min="0.1" max="1" step="0.05" />
-              <span id="threshold-val"></span>
-            </label>
+            <ol id="rail" class="rail" aria-label="Journey mapping"></ol>
+            <label class="planned small">Planned length <input id="planned" type="number" min="12" max="300" step="1" /> Footsteps</label>
+            <details class="legend-wrap"><summary>How to read the graph</summary><div id="legend" class="legend"></div></details>
           </div>
         </div>
       </section>

@@ -26,6 +26,7 @@
   let charView = null;
   let busy = false;
   let stageMarks = [];
+  let nodeSet = null;
 
   // ---------- persistence: one record per Journey, plus an index ----------
 
@@ -790,6 +791,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
     journey = j;
     selectedId = null;
     charView = null;
+    toggleCharPop(false);
     document.body.className = 'view-journey';
     $('#home').hidden = true;
     $('#journey-view').hidden = false;
@@ -906,6 +908,19 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
     if (journey) renderGraph();
   }
 
+  // Labels keep the same on-screen size at any zoom; only the circles and
+  // lines grow, so zooming in shows magnitude and data more clearly.
+  function labelFont(k) {
+    return { color: cssVar('--node-font'), size: 12 * k, strokeWidth: 4 * k, strokeColor: cssVar('--bg2'), face: 'Manrope, system-ui, sans-serif', vadjust: 2 * k };
+  }
+
+  function scaleLabels() {
+    if (!network || !nodeSet) return;
+    const k = 1 / Math.max(0.05, network.getScale());
+    const font = labelFont(k);
+    nodeSet.update(nodeSet.getIds().map((id) => ({ id, font })));
+  }
+
   function renderGraph(opts = {}) {
     const C = {
       bg: cssVar('--node-bg'),
@@ -924,21 +939,19 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
     const num = {};
     order.forEach((id, i) => (num[id] = i + 1));
     const pos = layout(visible);
-    const many = visible.length > 30;
 
     const nodes = visible.map((f) => {
       const hasViolation = f.violations?.some((v) => v);
       const branch = f.thread === 'branch';
       const data = NSMM.dataAmount(f);
       const heavy = data > NSMM.SPLIT_AT;
-      const tag = num[f.id] ? String(num[f.id]) : 'B';
       return {
         id: f.id,
         x: pos[f.id].x,
         y: pos[f.id].y,
         fixed: true,
-        label: many ? tag : `${tag}. ${shortText(f.event, 22)}`,
-        title: `${f.id} · ${f.event}\nData ${data} / ${NSMM.SPLIT_AT}${heavy ? ' (heavy: consider splitting)' : ''}`,
+        label: f.id,
+        title: `${num[f.id] ? `#${num[f.id]} · ` : 'Branch · '}${f.id}\n${f.event}\nData ${data} / ${NSMM.SPLIT_AT}${heavy ? ' (heavy: consider splitting)' : ''}`,
         size: 8 + 16 * Math.min(1, data / NSMM.SPLIT_AT),
         shape: 'dot',
         color: {
@@ -949,7 +962,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
         },
         borderWidth: heavy ? 4 : hasViolation || branch ? 3 : 2,
         shapeProperties: { borderDashes: branch ? [6, 4] : heavy ? [3, 3] : false },
-        font: { color: C.font, size: many ? 14 : 16, strokeWidth: 3, strokeColor: cssVar('--bg2'), face: 'Fredoka, Nunito, system-ui, sans-serif', vadjust: 2 },
+        font: labelFont(1),
       };
     });
     const ids = new Set(visible.map((f) => f.id));
@@ -989,7 +1002,8 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
       $('#graph').innerHTML = '<p class="muted pad">Graph library failed to load.</p>';
       return;
     }
-    const data = { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) };
+    nodeSet = new vis.DataSet(nodes);
+    const data = { nodes: nodeSet, edges: new vis.DataSet(edges) };
     if (!network) {
       network = new vis.Network($('#graph'), data, {
         layout: { hierarchical: false, improvedLayout: false },
@@ -999,11 +1013,12 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
       network.on('click', (p) => {
         if (p.nodes.length) selectFootstep(p.nodes[0]);
       });
+      network.on('zoom', scaleLabels);
       network.on('beforeDrawing', (ctx) => {
         ctx.save();
         // Keep stage names readable at any zoom.
         const k = 1 / Math.max(0.2, network.getScale());
-        ctx.font = `600 ${12 * k}px Fredoka, Nunito, system-ui, sans-serif`;
+        ctx.font = `600 ${11 * k}px Manrope, system-ui, sans-serif`;
         ctx.lineWidth = k;
         const head = cssVar('--head');
         const bg = cssVar('--bg2');
@@ -1025,12 +1040,16 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
         });
         ctx.restore();
       });
-      network.once('afterDrawing', () => network.fit({ animation: false }));
+      network.once('afterDrawing', () => {
+        network.fit({ animation: false });
+        scaleLabels();
+      });
     } else {
       const view = !opts.fit && { position: network.getViewPosition(), scale: network.getScale() };
       network.setData(data);
       if (view) network.moveTo({ ...view, animation: false });
       else network.fit({ animation: false });
+      scaleLabels();
     }
     renderPlaceOptions();
     if (selectedId && ids.has(selectedId)) network.selectNodes([selectedId]);
@@ -1080,8 +1099,8 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
     if (c) {
       const r = recurrence(c);
       el.innerHTML = `
-        <button class="back ghost small" data-char-back>← All characters</button>
-        <div class="char-head"><h3>${esc(c.name)}</h3><button class="ghost small" data-char-del>Remove</button></div>
+        <div class="pop-head"><button class="back ghost small" data-char-back>← All characters</button><button class="x" data-char-close aria-label="Close">×</button></div>
+        <div class="char-head">${avatar(c.name)}<h3>${esc(c.name)}</h3><button class="ghost small" data-char-del>Remove</button></div>
         <div class="recur"><div class="bar"><i style="width:${r.pct}%"></i></div><span class="small">Appears in ${r.hits.length} of ${r.total} Footsteps · <strong>${r.pct}%</strong> recurring</span></div>
         <h4>Physical features</h4>
         <div class="chips">${c.physical.map((p, i) => `<span class="chip">${esc(p)}<button data-phys-del="${i}" aria-label="Remove ${esc(p)}">×</button></span>`).join('') || '<span class="muted small">None yet.</span>'}</div>
@@ -1103,20 +1122,42 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
       return;
     }
     charView = null;
-    const rows = journey.characters
-      .map((x) => ({ c: x, r: recurrence(x) }))
-      .sort((a, b) => b.r.hits.length - a.r.hits.length)
+    const people = journey.characters.map((x) => ({ c: x, r: recurrence(x) })).sort((a, b) => b.r.hits.length - a.r.hits.length);
+    const grid = people
       .map(
-        ({ c: x, r }) => `<button class="char-row" data-char-open="${esc(x.name)}">
-          <span class="char-name">${esc(x.name)}<small class="muted">${esc(x.physical[0] || '')}</small></span>
-          <span class="char-meta"><span class="mini"><i style="width:${r.pct}%"></i></span>${r.pct}%<small class="muted">${x.traits.length} trait${x.traits.length === 1 ? '' : 's'}</small></span>
+        ({ c: x, r }) => `<button class="person" data-char-open="${esc(x.name)}" title="${esc(x.physical.join(', ') || x.name)}">
+          ${avatar(x.name)}
+          <span class="person-name">${esc(x.name)}</span>
+          <span class="person-pct">${r.pct}%</span>
         </button>`
       )
       .join('');
     el.innerHTML = `
-      <h2>Characters <span class="muted">${journey.characters.length || ''}</span></h2>
-      ${rows || '<p class="muted small">Characters appear here as you speak. Click one to see their traits, how often they recur and how they look.</p>'}
+      <div class="pop-head"><h2>Characters</h2><button class="x" data-char-close aria-label="Close">×</button></div>
+      ${grid ? `<div class="people-grid">${grid}</div>` : '<p class="muted small">Characters appear here as you speak. Click one to see their traits, how often they recur and how they look.</p>'}
       <form class="add-char"><input placeholder="Add a character" aria-label="New character name" /></form>`;
+    renderCharBar();
+  }
+
+  // A round user icon, tinted per character.
+  function avatar(name, cls = '') {
+    let h = 0;
+    for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 360;
+    return `<span class="avatar ${cls}" style="--hue:${h}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7z"/></svg></span>`;
+  }
+
+  function renderCharBar() {
+    const people = journey.characters;
+    $('#char-count').textContent = people.length ? `(${people.length})` : '';
+    $('#char-faces').innerHTML = people.slice(0, 5).map((c) => avatar(c.name, 'mini')).join('');
+  }
+
+  function toggleCharPop(open) {
+    const pop = $('#char-pop');
+    open = open ?? pop.hidden;
+    pop.hidden = !open;
+    $('#char-toggle').setAttribute('aria-expanded', String(open));
+    $('#char-toggle').classList.toggle('open', open);
   }
 
   function renderAlerts() {
@@ -1428,7 +1469,11 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('#add').click();
     });
     $('#render').addEventListener('click', () => run(renderDraft));
-    $('#fit').addEventListener('click', () => network && network.fit({ animation: { duration: 300 } }));
+    $('#fit').addEventListener('click', () => {
+      if (!network) return;
+      network.fit({ animation: false });
+      scaleLabels();
+    });
     $('#journey-title').addEventListener('change', (e) => {
       journey.title = e.target.value.trim() || 'Untitled Journey';
       save();
@@ -1475,7 +1520,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
 
     document.body.addEventListener('click', (e) => {
       const t = e.target.closest(
-        '[data-act],[data-goto],[data-move],[data-shift],[data-place-after],[data-split],[data-delete],[data-seed-del],[data-char-open],[data-char-back],[data-char-del],[data-char-pick],[data-phys-del],[data-trait-del],#copy-draft,#dl-draft'
+        '[data-act],[data-goto],[data-move],[data-shift],[data-place-after],[data-split],[data-delete],[data-seed-del],[data-char-open],[data-char-back],[data-char-close],[data-char-del],[data-char-pick],[data-phys-del],[data-trait-del],#copy-draft,#dl-draft'
       );
       if (!t || !journey) return;
       const f = selectedId && fsById(selectedId);
@@ -1521,6 +1566,8 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
       } else if (t.dataset.charOpen) {
         charView = t.dataset.charOpen;
         renderCharacters();
+      } else if (t.hasAttribute('data-char-close')) {
+        toggleCharPop(false);
       } else if (t.hasAttribute('data-char-back')) {
         charView = null;
         renderCharacters();
@@ -1637,6 +1684,10 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
     });
 
     // settings
+    $('#char-toggle').addEventListener('click', () => toggleCharPop());
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !$('#char-pop').hidden) toggleCharPop(false);
+    });
     $('#theme-btn').addEventListener('click', () => setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
     $('#settings-btn').addEventListener('click', openSettings);
     $('#m-settings').addEventListener('click', openSettings);
@@ -1676,6 +1727,10 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
         .join('') +
       '<span><i class="ring branch"></i>Branch</span><span><i class="ring heavy"></i>Heavy, split it</span><span><i class="ring broken"></i>Trait break</span>';
     if (!SR) $('#mic-note').textContent = 'Voice needs Chrome or Edge. Typing works everywhere.';
+    // The same scribble also draws itself over the graph while Kahyo works.
+    const big = $('.scribble').cloneNode(true);
+    big.classList.add('big');
+    $('.graph-wrap').appendChild(big);
     bind();
     route();
     document.fonts?.ready.then(() => journey && renderGraph());

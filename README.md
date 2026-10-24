@@ -79,4 +79,5 @@ Your Journey and API key stay in your browser. When a key is set, transcripts ar
 - **Stages** are not labelled until 12 main Footsteps. Then Gemini reads the whole Journey and labels each moment (every 3 new Footsteps); offline, labels follow position within the planned length.
 - **Left pane**: speak and correct, then a character list (recurrence %, traits with strictness, physical features picked from the story).
 - **Right pane**: Footstep (five editable parameters), Alerts, helper Draft; below it the Footstep modifier with Intent Vector sliders and ranges.
-- **Theme**: light (white and greys, deep purple) and dark (deep violet, yellow), Fredoka type, flat pill buttons.
+- **Theme**: light (white and greys, deep purple) and dark (deep violet, yellow), Fraunces headings with Manrope text, flat pill buttons. While Kahyo works, the logo scribbles itself.
+- **Graph labels** show only the Footstep id and keep their size when you zoom; stages and the planned length sit under the graph, the Terminancy threshold above it. Characters open as a pop-up from a bar under Think out loud.
