@@ -127,7 +127,7 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: var(--h
   position: relative;
 }
 .brand { display: flex; align-items: center; }
-.brand img { height: 30px; width: auto; display: block; }
+.brand img { height: 42px; width: auto; display: block; }
 .brand .logo-dark { display: none; }
 :root[data-theme='dark'] .brand .logo-light { display: none; }
 :root[data-theme='dark'] .brand .logo-dark { display: block; }
@@ -150,17 +150,15 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: var(--h
 .menu button:hover { background: var(--card2); }
 body.view-home .journey-only { display: none; }
 
-/* busy: the logo scribbles itself, loop by loop */
-.scribble { width: 30px; height: 30px; display: none; overflow: visible; margin-left: -4px; }
-.scribble ellipse { fill: none; stroke: var(--brand); stroke-width: 7; stroke-linecap: round; stroke-dasharray: 240; stroke-dashoffset: 240; animation: scribble 1.8s ease-in-out infinite; }
-.scribble ellipse:nth-child(2) { animation-delay: 0.18s; }
-.scribble ellipse:nth-child(3) { animation-delay: 0.36s; }
-.scribble ellipse:nth-child(4) { animation-delay: 0.54s; }
-.scribble ellipse:nth-child(5) { animation-delay: 0.72s; }
-@keyframes scribble { 0% { stroke-dashoffset: 240; } 45%, 60% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -240; } }
-body.busy .scribble { display: block; }
-.scribble.big { position: absolute; left: 50%; top: 50%; width: 110px; height: 110px; margin: -55px 0 0 -55px; pointer-events: none; z-index: 3; }
-.scribble.big ellipse { stroke-width: 4; }
+/* busy: the logo draws itself, loop by loop, then fills in (top right of the graph) */
+.scribble { width: 44px; height: 54px; visibility: hidden; flex: none; }
+.scribble .ink-lines path { fill: none; stroke: var(--brand); stroke-width: 9; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; }
+.scribble .ink-fill { fill: var(--brand); opacity: 0; }
+body.busy .scribble { visibility: visible; }
+body.busy .scribble .ink-lines path { animation: ink 2.6s ease-in-out infinite; animation-delay: calc(var(--i) * 0.035s); }
+body.busy .scribble .ink-fill { animation: inkfill 2.6s ease-in-out infinite; }
+@keyframes ink { 0% { stroke-dashoffset: 1; } 50%, 85% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
+@keyframes inkfill { 0%, 55% { opacity: 0; } 70%, 85% { opacity: 1; } 100% { opacity: 0; } }
 
 /* home */
 .home { flex: 1; overflow: auto; padding: 56px max(28px, calc((100vw - 1100px) / 2)); }
@@ -423,3 +421,5 @@ dialog .actions { justify-content: flex-end; margin-top: 16px; }
   .stats { gap: 10px; }
   .home { padding: 20px 16px; }
 }
+.graph-head .scribble { order: 2; margin: -10px 0 -14px; }
+.graph-head .stats { order: 3; flex-basis: 100%; }
