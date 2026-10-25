@@ -1459,7 +1459,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
         if (/^(\d+\.|[-*])\s/.test(b)) {
           const ordered = /^\d+\./.test(b);
           const items = b.split(/\n/).map((l) => `<li>${inline(l.replace(/^(\d+\.|[-*])\s*/, ''))}</li>`).join('');
-          return ordered ? `<ol>${items}</ol>` : `<ul>${items}</ul>`;
+          return ordered ? `<ol start="${parseInt(b, 10) || 1}">${items}</ol>` : `<ul>${items}</ul>`;
         }
         return `<p>${inline(b).replace(/\n/g, '<br>')}</p>`;
       })

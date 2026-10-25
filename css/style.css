@@ -192,7 +192,7 @@ body.busy .scribble { visibility: visible; }
 .layout {
   flex: 1;
   display: grid;
-  grid-template-columns: 330px minmax(0, 1fr) 380px;
+  grid-template-columns: 340px minmax(0, 1fr) 380px;
   gap: var(--gap);
   padding: var(--gap) 28px 28px;
   min-height: 0;
@@ -200,11 +200,11 @@ body.busy .scribble { visibility: visible; }
 .col { display: flex; flex-direction: column; gap: var(--gap); min-height: 0; }
 .card { background: var(--card); border: 1px solid var(--border2-solid); border-radius: var(--radius); padding: 22px; }
 .left { position: relative; }
-.left .speak { flex: 1 1 auto; overflow: auto; display: flex; flex-direction: column; }
-.left .speak textarea { flex: 1 1 auto; min-height: 160px; }
+.left .speak { flex: 0 1 auto; overflow: auto; display: flex; flex-direction: column; }
+.left .speak textarea { flex: none; height: 264px; min-height: 120px; }
 
 /* characters: a bar that pops up */
-.char-dock { position: relative; flex: none; }
+.char-dock { position: relative; flex: none; margin-top: auto; }
 .char-bar {
   width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 18px;
   background: var(--card); border: 1px solid var(--border2-solid); border-radius: 999px; text-align: left;
@@ -387,8 +387,11 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 
 /* draft */
 #render { width: 100%; margin-bottom: 12px; }
-.prose { font: 15.5px/1.75 var(--font); color: var(--ink); }
-.prose h2, .prose h3, .prose h4 { color: var(--head); font-size: 19px; }
+.prose { font: 14.5px/1.7 var(--font); color: var(--ink); }
+.prose h2, .prose h3, .prose h4 { color: var(--head); font-size: 15px; font-weight: 700; margin: 18px 0 8px; }
+.prose strong { font-weight: 600; }
+.prose ol, .prose ul { padding-left: 22px; }
+.prose li { margin: 4px 0; }
 .prose hr { border: 0; text-align: center; margin: 20px 0; }
 .prose hr::after { content: '✦'; color: var(--brand); }
 
@@ -456,7 +459,6 @@ body.mode-inspect .mword { display: block; }
 .health.drift i { background: var(--amber); box-shadow: 0 0 0 4px color-mix(in srgb, var(--amber) 25%, transparent); }
 
 /* Write mode: wider speaking area, slim margin for notes */
-@media (min-width: 1181px) { body.mode-write .layout { grid-template-columns: 360px minmax(0, 1fr) 320px; } }
 .right .tabs-card { flex: 1 1 auto; }
 
 /* notes read like margin comments */
@@ -475,7 +477,7 @@ body.mode-inspect .mword { display: block; }
 /* drawer for the selected moment */
 .layout { position: relative; }
 .drawer {
-  position: absolute; top: var(--gap); right: 28px; bottom: 28px; width: min(420px, calc(100% - 56px)); z-index: 12;
+  position: absolute; top: var(--gap); right: 28px; bottom: 28px; width: min(380px, calc(100% - 56px)); z-index: 12;
   overflow: auto; box-shadow: 0 20px 60px rgba(20, 10, 40, 0.22); animation: drawer 0.2s ease-out;
 }
 .drawer[hidden] { display: none; }
