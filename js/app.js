@@ -762,18 +762,31 @@ ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
       const people = journey.characters
         .map((c) => `${c.name}${c.physical.length ? ` (looks: ${c.physical.join(', ')})` : ''}${c.traits.length ? `; traits: ${c.traits.filter((t) => t.level !== 'off').map((t) => t.text).join(', ')}` : ''}`)
         .join('\n');
-      journey.draft = await LLM.generateText(
-        `You help a writer, you do not replace them. From the story moments below, write a helper draft of "${journey.title}": a scene-by-scene scaffold in plain, simple prose that connects the moments in order and keeps characters consistent with how they look and behave. Leave the writer room: keep each scene short (60-120 words), and put [brackets] where a choice, a line of dialogue or a detail is the writer's to make. Do not add major events. Group scenes under their stage when one is given. End with a short "Open threads" list of promises that are not paid off yet, and a "Side paths" list of the branches if there are any.
+      // Grounded on purpose: the draft may only use what the writer said.
+      // Anything missing becomes a [question] for the writer, never invented.
+      const raw = await LLM.generateText(
+        `You help a writer; you never replace them. Turn the story moments below into a helper draft of "${journey.title}".
+
+STRICT RULES:
+- Use ONLY the facts in the moments, characters and context below. Do not invent any new character, place, object, event, backstory, motive, dialogue or description.
+- If a scene needs a detail the writer has not given, write a short question in brackets for the writer instead, e.g. [What does the king build?]. Never fill it in yourself.
+- One short paragraph per moment, 1 to 3 sentences, about as long as the moment itself. Do not pad.
+- Start each paragraph with the moment number in bold, e.g. **3.** Keep the moments in this order.
+- Group the paragraphs under "## <stage>" headings when a stage is given.
+- No word counts, no notes about length, no commentary.
+- End with "## Open threads": the promises below that later moments do not pay off, one per line. Then "## Side paths": the side-path moments, one per line, if there are any.
 
 Characters:
 ${people || '(none)'}
 
 Main story, in order:
-${main.map((f, i) => `${i + 1}. [${f.stage || 'unstaged'}] ${f.event}${f.context ? ` (${f.context})` : ''}${f.promises?.length ? ` | promises: ${f.promises.join('; ')}` : ''}`).join('\n')}
+${main.map((f, i) => `${i + 1}. [${f.stage || 'unstaged'}] ${f.event}${f.context ? ` (${f.context})` : ''}${f.subjects?.length ? ` | who: ${f.subjects.join(', ')}` : ''}${f.promises?.length ? ` | promises: ${f.promises.join('; ')}` : ''}`).join('\n')}
 
 Side paths (branches, not in the main story):
-${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
+${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
+        { temperature: 0.2, thinkingConfig: { thinkingLevel: 'low' } }
       );
+      journey.draft = raw.replace(/\s*\(\s*\d+\s*words?\s*\)/gi, '');
     }
     save();
     renderDraftPanel();

@@ -98,9 +98,10 @@
     }
   }
 
-  async function generateText(prompt) {
+  async function generateText(prompt, generationConfig) {
     const data = await generate({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      ...(generationConfig ? { generationConfig } : {}),
     });
     return data.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text).join('') || '';
   }
