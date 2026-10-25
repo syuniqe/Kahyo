@@ -494,3 +494,8 @@ body.mode-write .iv-wrap { grid-template-columns: 1fr; }
   .drawer { position: fixed; top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 82vh; border-radius: 22px 22px 0 0; }
   .mode-switch button { padding: 5px 10px; }
 }
+
+/* Inspect: the moment's pane is docked as the first tab */
+.drawer.docked { position: static; width: auto; box-shadow: none; border: 0; padding: 0; background: transparent; animation: none; overflow: visible; border-radius: 0; }
+.drawer.docked [data-drawer-close] { display: none; }
+@media (max-width: 1180px) { .drawer.docked { position: static; max-height: none; } }

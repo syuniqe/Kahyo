@@ -842,8 +842,9 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
     $('#home').hidden = true;
     $('#journey-view').hidden = false;
     renderAll({ fit: true });
-    showTab('notes');
     $('#drawer').hidden = true;
+    placeDrawer();
+    if (!inspecting()) showTab('notes');
     setStatus(journey.footsteps.length ? 'Welcome back to ' + journey.title + '.' : 'Press Speak and tell your story the way you think it.');
   }
 
@@ -1471,12 +1472,33 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
     renderModifier();
     if (network && fsById(id)?.thread !== 'archived') network.selectNodes([id]);
     $('#drawer').hidden = false;
+    if (inspecting()) showTab('footstep');
   }
 
   function closeDrawer() {
-    $('#drawer').hidden = true;
     selectedId = null;
     network?.unselectAll();
+    if (inspecting()) {
+      renderDetail();
+      renderModifier();
+    } else $('#drawer').hidden = true;
+  }
+
+  // Inspect docks the moment's pane in the right column as its first tab;
+  // Write floats it as a drawer over the map.
+  function placeDrawer() {
+    const d = $('#drawer');
+    if (inspecting()) {
+      $('#panel-footstep').appendChild(d);
+      d.classList.add('docked');
+      d.hidden = false;
+      showTab('footstep');
+    } else {
+      $('.layout').appendChild(d);
+      d.classList.remove('docked');
+      d.hidden = !selectedId;
+      if ($('.tab.active')?.dataset.tab === 'footstep') showTab('notes');
+    }
   }
 
   function inspecting() {
@@ -1491,6 +1513,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
     try {
       localStorage.setItem('kahyo.mode', mode);
     } catch {}
+    placeDrawer();
     if (journey && network) renderGraph();
   }
 

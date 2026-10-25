@@ -133,9 +133,11 @@
       <section class="col right">
         <div class="card tabs-card">
           <div class="tabs" role="tablist">
+            <button class="tab inspect-only" data-tab="footstep" role="tab">Footstep</button>
             <button class="tab active" data-tab="notes" role="tab">Notes <span id="alert-count"></span></button>
             <button class="tab" data-tab="draft" role="tab">Draft</button>
           </div>
+          <div id="panel-footstep" class="tab-panel" hidden></div>
           <div id="panel-notes" class="tab-panel"><div id="alerts"></div></div>
           <div id="panel-draft" class="tab-panel" hidden>
             <p class="muted small">A helper draft built from every Footstep, to get you moving. It is a scaffold for your own writing, not a replacement for it.</p>
