@@ -81,3 +81,9 @@ Your Journey and API key stay in your browser. When a key is set, transcripts ar
 - **Right pane**: Footstep (five editable parameters), Alerts, helper Draft; below it the Footstep modifier with Intent Vector sliders and ranges.
 - **Theme**: light (white and greys, deep purple) and dark (deep violet, yellow), Fraunces headings with Manrope text, flat pill buttons. While Kahyo works, the logo scribbles itself.
 - **Graph labels** show only the Footstep id and keep their size when you zoom; stages and the planned length sit under the graph, the Terminancy threshold above it. Characters open as a pop-up from a bar under Think out loud.
+
+## Write and Inspect (v3)
+
+- **Write** (default): speaking area, story map, a single story-health signal (On course, Wandering a little, Drifting) and quiet notes in the margin. Moments with a note get a small dot on the map.
+- **Inspect**: adds the numbers, the threshold slider, threshold outlines, the Intent Vector gauge, sliders and ranges, with the maths term under each writer-friendly label.
+- Clicking a moment opens its details in a drawer; Esc, × or a click on empty map closes it.
