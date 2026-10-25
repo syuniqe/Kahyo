@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="assets/kahyo-mark-256.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..600&family=Manrope:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" />
   <script>
     // Apply the saved theme before first paint, else follow the system setting.
     (function () {
@@ -115,6 +115,8 @@
             <div class="graph-tools">
               <button id="fit" class="ghost small" title="Fit the whole Journey">Fit</button>
             </div>
+            <button id="drift-banner" class="drift-banner" data-drift hidden>Your story is drifting from its main line · see Alerts</button>
+            <div id="edge-tool" class="edge-tool" hidden></div>
           </div>
           <div class="graph-foot">
             <ol id="rail" class="rail" aria-label="Journey mapping"></ol>

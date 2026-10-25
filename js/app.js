@@ -472,12 +472,37 @@ Writer's spoken fragment:
     });
 
     await relabelStages(!preExtracted);
+    checkDrift();
     save();
     renderAll({ fit: true });
     selectFootstep(newIds[newIds.length - 1]);
     const flagged = journey.alerts.filter((a) => a.open && newIds.includes(a.fsId)).length;
     if (flagged) showTab('alerts');
     setStatus(`Added ${items.length} Footstep${items.length > 1 ? 's' : ''}${flagged ? `, ${flagged} need${flagged > 1 ? '' : 's'} your attention` : ''}.`, flagged ? 'warn' : 'ok');
+  }
+
+  // Story drift: placeholder rule until the math study defines it. Of the last
+  // six Footsteps written, if half or more are branches or past the
+  // Terminancy threshold, the story is wandering from its main line.
+  const DRIFT_WINDOW = 6;
+  const DRIFT_SHARE = 0.5;
+  function checkDrift() {
+    const recent = journey.footsteps
+      .filter((f) => f.thread !== 'archived')
+      .sort((a, b) => a.created_at - b.created_at)
+      .slice(-DRIFT_WINDOW);
+    const off = recent.filter((f) => f.thread === 'branch' || (f.metrics?.terminancy ?? 0) > journey.threshold);
+    const drifting = recent.length >= 4 && off.length >= 3 && off.length / recent.length >= DRIFT_SHARE;
+    const open = journey.alerts.find((a) => a.open && a.kind === 'drift');
+    const count = journey.footsteps.length;
+    if (!drifting) {
+      if (open) open.open = false;
+      return;
+    }
+    if (journey.driftDismissedAt === count) return;
+    const text = `Your story is drifting from its main line: ${off.length} of the last ${recent.length} Footsteps are off course (${off.map((f) => f.id).join(', ')}). Bring the next idea back to the main thread, or raise the threshold if this is deliberate.`;
+    if (open) open.text = text;
+    else journey.alerts.unshift({ id: 'a' + uid(), kind: 'drift', fsId: off[off.length - 1].id, text, open: true });
   }
 
   // A Footstep with too much in it is probably two moments.
@@ -684,6 +709,7 @@ ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
       placeInOrder(fs.id, from ? from.from : 'END');
     }
     if (action === 'archive' && fs) fs.thread = 'archived';
+    if (action === 'dismiss') journey.driftDismissedAt = journey.footsteps.length;
     if (action === 'relax') {
       const t = character(a.character)?.traits.find((x) => x.text === a.trait);
       if (t) t.level = 'flexible';
@@ -945,6 +971,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
       const branch = f.thread === 'branch';
       const data = NSMM.dataAmount(f);
       const heavy = data > NSMM.SPLIT_AT;
+      const over = (f.metrics?.terminancy ?? 0) > journey.threshold;
       return {
         id: f.id,
         x: pos[f.id].x,
@@ -956,11 +983,13 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
         shape: 'dot',
         color: {
           background: branch ? C.branchBg : hasViolation ? C.breakBg : C.bg,
-          border: hasViolation ? C.red : branch ? C.amber : heavy ? '#FD3A0A' : C.border,
+          border: hasViolation ? C.red : branch || over ? C.amber : heavy ? '#FD3A0A' : C.border,
           highlight: { background: C.bg, border: '#FD3A0A' },
           hover: { background: C.bg, border: '#FD3A0A' },
         },
-        borderWidth: heavy ? 4 : hasViolation || branch ? 3 : 2,
+        borderWidth: heavy || over ? 4 : hasViolation || branch ? 3 : 2,
+        // Past the Terminancy threshold: a thick amber outline with a glow.
+        shadow: { enabled: over, color: C.amber, size: 14, x: 0, y: 0 },
         shapeProperties: { borderDashes: branch ? [6, 4] : heavy ? [3, 3] : false },
         font: labelFont(1),
       };
@@ -968,14 +997,14 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
     const ids = new Set(visible.map((f) => f.id));
     const spine = order.slice(1).map((id, i) => ({ from: order[i], to: id, type: 'temporal', spine: true }));
     const typed = journey.edges.filter((e) => !(e.type === 'temporal' && num[e.from] && num[e.to]));
-    const edges = [...spine, ...typed]
+    const edges = [...spine.map((e, i) => ({ ...e, key: 's' + i })), ...typed.map((e) => ({ ...e, key: 'j' + journey.edges.indexOf(e) }))]
       .filter((e) => ids.has(e.from) && ids.has(e.to))
-      .map((e, i) => {
+      .map((e) => {
         const to = fsById(e.to);
         const vecLine = e.spine || (e.type === 'temporal' && to.thread !== 'main');
         const m = to.metrics || {};
         return {
-          id: 'e' + i,
+          id: e.key,
           from: e.from,
           to: e.to,
           arrows: { to: { enabled: true, scaleFactor: 0.6 } },
@@ -1014,6 +1043,10 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
         if (p.nodes.length) selectFootstep(p.nodes[0]);
       });
       network.on('zoom', scaleLabels);
+      network.on('selectEdge', (p) => {
+        if (!p.nodes.length && p.edges.length) showEdgeTool(p.edges[0]);
+      });
+      network.on('deselectEdge', () => showEdgeTool(null));
       network.on('beforeDrawing', (ctx) => {
         ctx.save();
         // Keep stage names readable at any zoom.
@@ -1033,9 +1066,9 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
           ctx.setLineDash([]);
           ctx.lineWidth = 4 * k;
           ctx.strokeStyle = bg;
-          ctx.strokeText(s.stage.toUpperCase(), s.x - 6 * k, s.y - 26 - 44 * k);
+          ctx.strokeText(s.stage, s.x - 6 * k, s.y - 26 - 44 * k);
           ctx.fillStyle = head;
-          ctx.fillText(s.stage.toUpperCase(), s.x - 6 * k, s.y - 26 - 44 * k);
+          ctx.fillText(s.stage, s.x - 6 * k, s.y - 26 - 44 * k);
           ctx.lineWidth = k;
         });
         ctx.restore();
@@ -1055,6 +1088,30 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
     if (selectedId && ids.has(selectedId)) network.selectNodes([selectedId]);
   }
 
+  // Clicking a link in the graph offers to delete it. Story-order lines are
+  // not links: they follow the order and change with Earlier/Later.
+  function showEdgeTool(key) {
+    const el = $('#edge-tool');
+    const e = key && key[0] === 'j' ? journey.edges[Number(key.slice(1))] : null;
+    if (!key) {
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    el.innerHTML = e
+      ? `<span>${esc(e.from)} → ${esc(e.to)} · ${EDGE_TYPES[e.type]?.label}</span><button class="small primary" data-edge-del="${key.slice(1)}">Delete link</button>`
+      : `<span class="muted">Story order line. Move Footsteps with Earlier and Later to change it.</span>`;
+  }
+
+  function deleteEdge(index) {
+    journey.edges.splice(index, 1);
+    showEdgeTool(null);
+    save();
+    renderGraph();
+    renderDetail();
+    setStatus('Link deleted.', 'ok');
+  }
+
   function renderPlaceOptions() {
     const sel = $('#place');
     const keep = sel.value || 'AUTO';
@@ -1070,12 +1127,15 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
     const ji = NSMM.journeyIntent(main);
     const branches = journey.footsteps.filter((f) => f.thread === 'branch').length;
     const open = journey.alerts.filter((a) => a.open).length;
+    const beyond = journey.footsteps.filter((f) => f.thread !== 'archived' && (f.metrics?.terminancy ?? 0) > journey.threshold).length;
     $('#stats').innerHTML = `
       <div><span>${main.length}</span>main</div>
       <div><span>${branches}</span>branch</div>
       <div><span>${ji ? ji.magnitude.toFixed(1) : '–'}</span>avg magnitude</div>
       <div><span>${ji ? (ji.direction >= 0 ? '+' : '') + ji.direction.toFixed(2) : '–'}</span>direction</div>
+      <div class="${beyond ? 'warn' : ''}"><span>${beyond}</span>past threshold</div>
       <div class="${open ? 'warn' : ''}"><span>${open}</span>alerts</div>`;
+    $('#drift-banner').hidden = !journey.alerts.some((a) => a.open && a.kind === 'drift');
     const n = main.length;
     if (n < NSMM.STAGE_LABEL_AFTER) {
       $('#rail').innerHTML =
@@ -1167,7 +1227,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
       el.innerHTML = '<p class="muted">No open alerts. Kahyo flags drifting ideas (Terminancy), characters acting against their traits, and Footsteps that hold too much here.</p>';
       return;
     }
-    const titles = { terminancy: 'Terminancy', contradiction: 'Contradiction review', heavy: 'Heavy Footstep' };
+    const titles = { terminancy: 'Terminancy', contradiction: 'Contradiction review', heavy: 'Heavy Footstep', drift: 'Story drift' };
     el.innerHTML = list
       .map((a) => {
         const actions =
@@ -1175,6 +1235,8 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
             ? `<button data-a="${a.id}" data-act="keep">Keep on main thread</button><button data-a="${a.id}" data-act="archive">Archive (decrumb)</button>`
             : a.kind === 'trait'
             ? `<button data-a="${a.id}" data-act="accept">Accept contradiction</button><button data-a="${a.id}" data-act="relax">Relax trait</button><button data-a="${a.id}" data-act="remove">Remove Footstep</button>`
+            : a.kind === 'drift'
+            ? `<button data-a="${a.id}" data-act="dismiss">Dismiss for now</button>`
             : a.kind === 'heavy'
             ? `<button data-a="${a.id}" data-act="split" class="primary">Split in two</button><button data-a="${a.id}" data-act="accept">Keep as one</button>`
             : `<button data-a="${a.id}" data-act="accept">It's intentional</button><button data-a="${a.id}" data-act="remove">Remove Footstep</button>`;
@@ -1217,9 +1279,10 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
       <div class="field"><span>5 · Seeds</span>
         <ul class="seeds">${
           seeds
-            .map((e) => `<li><span class="dot" style="background:${EDGE_TYPES[e.type]?.color}"></span>${e.to === f.id ? `← ${esc(e.from)}` : `→ ${esc(e.to)}`} · ${EDGE_TYPES[e.type]?.label}<button class="x" data-seed-del="${e.i}" aria-label="Remove seed">×</button></li>`)
+            .map((e) => `<li><span class="dot" style="background:${EDGE_TYPES[e.type]?.color}"></span>${e.to === f.id ? `← ${esc(e.from)}` : `→ ${esc(e.to)}`} · ${EDGE_TYPES[e.type]?.label}<button class="ghost small" data-seed-del="${e.i}" aria-label="Delete this link">Delete</button></li>`)
             .join('') || '<li class="muted">No links yet.</li>'
         }</ul>
+        ${seeds.length > 1 ? '<button class="ghost small" data-seeds-clear>Delete all links</button>' : ''}
         <form class="add-seed">
           <select name="from" aria-label="Linked from">${others.map((x) => `<option value="${esc(x.id)}">${esc(x.id)} ${esc(shortText(x.event, 28))}</option>`).join('')}</select>
           <select name="type" aria-label="Link type">${Object.entries(EDGE_TYPES)
@@ -1517,12 +1580,17 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
         renderAll();
       });
     });
+    // Outlines follow the slider live; the drift check runs on release.
     $('#threshold').addEventListener('input', (e) => {
       journey.threshold = Number(e.target.value);
       $('#threshold-val').textContent = journey.threshold.toFixed(2);
+      rescoreAll();
+      renderGraph();
+      renderStats();
     });
     $('#threshold').addEventListener('change', () => {
       rescoreAll();
+      checkDrift();
       save();
       renderAll();
     });
@@ -1550,12 +1618,13 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
 
     document.body.addEventListener('click', (e) => {
       const t = e.target.closest(
-        '[data-act],[data-goto],[data-move],[data-shift],[data-place-after],[data-split],[data-delete],[data-seed-del],[data-char-open],[data-char-back],[data-char-close],[data-char-del],[data-char-pick],[data-phys-del],[data-trait-del],#copy-draft,#dl-draft'
+        '[data-act],[data-goto],[data-move],[data-shift],[data-place-after],[data-split],[data-delete],[data-seed-del],[data-edge-del],[data-seeds-clear],[data-drift],[data-char-open],[data-char-back],[data-char-close],[data-char-del],[data-char-pick],[data-phys-del],[data-trait-del],#copy-draft,#dl-draft'
       );
       if (!t || !journey) return;
       const f = selectedId && fsById(selectedId);
       const c = charView && character(charView);
-      if (t.dataset.act) resolveAlert(t.dataset.a, t.dataset.act);
+      if (t.hasAttribute('data-drift')) showTab('alerts');
+      else if (t.dataset.act) resolveAlert(t.dataset.a, t.dataset.act);
       else if (t.dataset.goto) {
         e.preventDefault();
         selectFootstep(t.dataset.goto);
@@ -1589,10 +1658,15 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
           renderAll();
         });
       } else if (t.dataset.seedDel) {
-        journey.edges.splice(Number(t.dataset.seedDel), 1);
+        deleteEdge(Number(t.dataset.seedDel));
+      } else if (t.dataset.edgeDel) {
+        deleteEdge(Number(t.dataset.edgeDel));
+      } else if (t.hasAttribute('data-seeds-clear') && f) {
+        journey.edges = journey.edges.filter((x) => x.from !== f.id && x.to !== f.id);
         save();
         renderGraph();
         renderDetail();
+        setStatus(`Deleted every link of ${f.id}.`, 'ok');
       } else if (t.dataset.charOpen) {
         charView = t.dataset.charOpen;
         renderCharacters();
@@ -1751,11 +1825,11 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`
   function init() {
     migrate();
     $('#legend').innerHTML =
-      '<span class="legend-geo">Line angle = direction · line length = magnitude · circle size = data</span>' +
+      '<span class="legend-geo">Line angle = direction · line length = magnitude · circle size = data · click a link to delete it</span>' +
       Object.values(EDGE_TYPES)
         .map((t) => `<span><i style="background:${t.color}"></i>${t.label}</span>`)
         .join('') +
-      '<span><i class="ring branch"></i>Branch</span><span><i class="ring heavy"></i>Heavy, split it</span><span><i class="ring broken"></i>Trait break</span>';
+      '<span><i class="ring over"></i>Past threshold</span><span><i class="ring branch"></i>Branch</span><span><i class="ring heavy"></i>Heavy, split it</span><span><i class="ring broken"></i>Trait break</span>';
     if (!SR) $('#mic-note').textContent = 'Voice needs Chrome or Edge. Typing works everywhere.';
     bind();
     route();
