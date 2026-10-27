@@ -1,0 +1,9 @@
+// Cloudflare Workers: serve the built app in dist/ as static files.
+{
+  "name": "kahyo",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
