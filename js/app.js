@@ -1557,15 +1557,21 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     recognizer.continuous = true;
     recognizer.interimResults = true;
     baseText = $('#transcript').value ? $('#transcript').value.trim() + ' ' : '';
+    // Chrome on Android repeats the phrase so far in every result ("this", "this is",
+    // "this is a"), so a result that extends the one before replaces it instead of adding to it.
     recognizer.onresult = (e) => {
-      let finalText = '';
-      let interim = '';
+      const parts = [];
       for (let i = 0; i < e.results.length; i++) {
-        const r = e.results[i];
-        if (r.isFinal) finalText += r[0].transcript + ' ';
-        else interim += r[0].transcript;
+        const t = e.results[i][0].transcript.trim();
+        if (!t) continue;
+        const last = parts[parts.length - 1];
+        const a = last?.toLowerCase();
+        const b = t.toLowerCase();
+        if (last && b.startsWith(a)) parts[parts.length - 1] = t;
+        else if (last && a.startsWith(b)) continue;
+        else parts.push(t);
       }
-      $('#transcript').value = baseText + finalText + interim;
+      $('#transcript').value = baseText + parts.join(' ');
     };
     recognizer.onerror = (e) => setStatus('Mic error: ' + e.error + (e.error === 'not-allowed' ? '. Allow microphone access in your browser.' : ''), 'warn');
     recognizer.onend = () => {
