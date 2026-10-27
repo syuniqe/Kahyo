@@ -1917,7 +1917,14 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
           const j = normalize(data);
           if (!j) throw new Error('That file is not a Kahyo Journey. Pick the .kahyo.json file you exported.');
           journey = { ...j, id: uid(), embedder: null };
-          await ensureEmbedder();
+          try {
+            await ensureEmbedder();
+          } catch (err) {
+            // Never lose an import over embeddings: fall back to offline ones; they upgrade on the next add.
+            console.warn(err);
+            journey.footsteps.forEach((f) => (f.embedding = NSMM.localEmbedding(fsText(f))));
+            journey.embedder = 'local';
+          }
           await relabelStages(false);
           save();
           go(journey.id);

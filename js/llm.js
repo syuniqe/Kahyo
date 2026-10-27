@@ -106,17 +106,21 @@
     return data.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text).join('') || '';
   }
 
+  // The batch endpoint takes at most 100 texts per call.
   async function embed(texts) {
-    if (texts.length === 0) return [];
-    const data = await call(EMBED_MODEL, 'batchEmbedContents', {
-      requests: texts.map((t) => ({
-        model: 'models/' + EMBED_MODEL,
-        content: { parts: [{ text: t }] },
-        taskType: 'SEMANTIC_SIMILARITY',
-        outputDimensionality: EMBED_DIM,
-      })),
-    });
-    return data.embeddings.map((e) => e.values);
+    const out = [];
+    for (let i = 0; i < texts.length; i += 100) {
+      const data = await call(EMBED_MODEL, 'batchEmbedContents', {
+        requests: texts.slice(i, i + 100).map((t) => ({
+          model: 'models/' + EMBED_MODEL,
+          content: { parts: [{ text: t }] },
+          taskType: 'SEMANTIC_SIMILARITY',
+          outputDimensionality: EMBED_DIM,
+        })),
+      });
+      out.push(...data.embeddings.map((e) => e.values));
+    }
+    return out;
   }
 
   root.LLM = { settings, hasKey, generateJSON, generateText, embed, EMBED_DIM, DEFAULT_MODEL };
