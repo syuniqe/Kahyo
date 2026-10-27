@@ -1,2 +1,15 @@
 [build]
   publish = "."
+
+# Only the app is public; notes and tests stay in the repo.
+[[redirects]]
+  from = "/README.md"
+  to = "/"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/tests/*"
+  to = "/"
+  status = 404
+  force = true
