@@ -1626,7 +1626,9 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       await fn();
     } catch (e) {
       console.error(e);
-      setStatus(e.message || String(e), 'err');
+      // The status line lives in the Journey view; on the home page, say it out loud.
+      if (document.body.classList.contains('view-home')) alert(e.message || String(e));
+      else setStatus(e.message || String(e), 'err');
     } finally {
       busy = false;
       document.body.classList.remove('busy');
@@ -1906,8 +1908,14 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       if (!file) return;
       file.text().then((txt) =>
         run(async () => {
-          const j = normalize(JSON.parse(txt));
-          if (!j) throw new Error('That file is not a Kahyo Journey.');
+          let data = null;
+          try {
+            data = JSON.parse(txt.replace(/^\uFEFF/, ''));
+          } catch {
+            throw new Error('Could not read that file. Pick the .kahyo.json file you exported.');
+          }
+          const j = normalize(data);
+          if (!j) throw new Error('That file is not a Kahyo Journey. Pick the .kahyo.json file you exported.');
           journey = { ...j, id: uid(), embedder: null };
           await ensureEmbedder();
           await relabelStages(false);
