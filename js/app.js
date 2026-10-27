@@ -1271,7 +1271,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
   function renderCharBar() {
     const people = journey.characters;
     $('#char-count').textContent = people.length ? `(${people.length})` : '';
-    $('#char-faces').innerHTML = people.slice(0, 5).map((c) => avatar(c.name, 'mini')).join('');
+    $('#char-faces').innerHTML = people.slice(0, 5).map((c) => avatar(c.name, 'face')).join('');
   }
 
   function toggleCharPop(open) {

@@ -212,7 +212,9 @@ body.busy .scribble { visibility: visible; }
 .char-bar:hover, .char-bar.open { border-color: var(--head); }
 .char-bar-title { font-weight: 600; color: var(--head); white-space: nowrap; }
 .faces { display: flex; flex: 1; justify-content: flex-end; }
-.faces .avatar { margin-left: -8px; border: 2px solid var(--card); }
+.faces { gap: 0; padding-right: 4px; }
+.faces .avatar { margin-left: -6px; box-shadow: 0 0 0 2px var(--card); border: 0; }
+.faces .avatar:first-child { margin-left: 0; }
 .chev { color: var(--muted); transition: transform 0.2s; }
 .char-bar.open .chev { transform: rotate(180deg); }
 .char-pop {
@@ -235,7 +237,7 @@ body.busy .scribble { visibility: visible; }
 }
 :root[data-theme='dark'] .avatar { background: hsl(var(--hue) 35% 26%); color: hsl(var(--hue) 70% 82%); }
 .avatar svg { width: 58%; height: 58%; fill: currentColor; }
-.avatar.mini { width: 26px; height: 26px; }
+.avatar.face { width: 30px; height: 30px; }
 .right .tabs-card { flex: 1.25 1 0; min-height: 0; }
 .right .modifier { flex: 1 1 0; min-height: 0; overflow: auto; }
 .row { display: flex; align-items: center; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
