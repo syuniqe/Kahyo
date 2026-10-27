@@ -1,0 +1,19 @@
+/* Light mode, Studio: Paper layout with Notebook colours. Citron marks what is active, lilac marks side paths. */
+:root, :root[data-theme="light"] {
+  --bg: #f4efe5; --bg2: #ede7da; --card: #fbf8f2; --card2: #f0eadf;
+  --ink: #20201d; --ink-dim: rgba(32, 32, 29, 0.76); --muted: #7a7462; --head: #20201d;
+  --brand: #ff4a1c; --brand2: #e83d12; --on-brand: #fff;
+  --amber: #8f6fc4; --green: #6f7d1f; --red: #d9461f;
+  --border: rgba(32, 32, 29, 0.18); --border2: rgba(32, 32, 29, 0.08); --border2-solid: #e3dccd;
+  --chip: #eeeacb; --node-bg: #fbf8f2; --node-border: #20201d; --node-font: #20201d; --edge-order: #a89f8a;
+  --branch-bg: #ece6f6; --break-bg: #fbe1d8;
+  --citron: #d9e65a; --lilac: #b7a6d9;
+}
+:root { --display: "Fraunces", Georgia, serif; --prose: "Fraunces", Georgia, serif; --hand: "Caveat", cursive; }
+.tab .count { background: var(--brand); color: #fff; }
+
+.tab.active, .mode-switch button.on { background: var(--citron); color: var(--ink); box-shadow: none; }
+.health.ok { background: color-mix(in srgb, var(--citron) 50%, var(--card)); }
+.health.wander, .health.drift { background: color-mix(in srgb, var(--lilac) 35%, var(--card)); color: var(--ink); }
+.ndot { background: var(--brand); }
+.alert.note.trait.soft .ndot, .alert.note.terminancy .ndot { background: var(--lilac); }

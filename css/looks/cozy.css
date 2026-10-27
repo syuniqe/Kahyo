@@ -1,0 +1,65 @@
+/* Cozy base: one size for every control, one spacing scale, soft paper cards.
+   Loaded after style.css; a look file (paper, notebook, night) sets the colours and type. */
+:root {
+  --ctl: 38px;        /* every button, select and input */
+  --ctl-sm: 30px;     /* small buttons inside cards */
+  --s1: 8px; --s2: 12px; --s3: 16px; --s4: 24px; --s5: 32px;
+  --radius: 20px;
+  --gap: 24px;
+  --shadow: 0 1px 2px rgba(32, 32, 29, 0.05), 0 8px 24px rgba(32, 32, 29, 0.06);
+  --display: var(--font);
+  --label: var(--font);
+}
+body { font-size: 14.5px; line-height: 1.65; }
+
+/* controls: same height, same radius, same weight everywhere */
+button, select, input {
+  min-height: var(--ctl); font-size: 13.5px; font-weight: 600; letter-spacing: 0;
+}
+button {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s1);
+  height: var(--ctl); padding: 0 18px; border-radius: 999px; line-height: 1; white-space: nowrap;
+}
+select, input { height: var(--ctl); padding: 0 14px; border-radius: 999px; font-weight: 500; }
+input[type=range], input[type=checkbox] { height: auto; min-height: 0; padding: 0; }
+textarea { border-radius: 16px; padding: 14px 16px; font-weight: 400; }
+button.small, .small button, .actions button, .alert.note .actions button, .add-seed button, .seeds li .ghost, #fit {
+  height: var(--ctl-sm); min-height: var(--ctl-sm); padding: 0 14px; font-size: 12.5px;
+}
+.add-seed select, .place select, .trait-row select, .planned input { height: var(--ctl-sm); min-height: var(--ctl-sm); font-size: 12.5px; }
+button.x { height: auto; min-height: 0; padding: 0 4px; }
+.theme-btn { width: var(--ctl); padding: 0; }
+.mic { height: 48px; font-size: 15px; }
+#add, #render { height: 44px; }
+.tab, .mode-switch button { height: 32px; min-height: 32px; padding: 0 16px; font-size: 13px; }
+.tabs, .mode-switch { padding: 3px; }
+.tabs { margin: 0 0 var(--s4); }
+.menu button, .person, .char-row, .char-bar { height: auto; }
+.menu button { justify-content: flex-start; min-height: 36px; }
+.person { justify-content: flex-start; }
+.char-row { justify-content: space-between; }
+.char-bar { justify-content: flex-start; min-height: 56px; }
+.health { height: 32px; min-height: 32px; padding: 0 14px; font-size: 13px; }
+
+/* cards: no hard borders, soft shadow, generous padding */
+.card, .jcard { border-color: transparent; box-shadow: var(--shadow); border-radius: var(--radius); }
+.card { padding: var(--s4); }
+.top { padding: var(--s3) var(--s5); gap: var(--s2); box-shadow: none; }
+.layout { padding: var(--s4) var(--s5) var(--s5); }
+.back-link { height: var(--ctl); padding: 0 18px; font-size: 13.5px; box-shadow: var(--shadow); border-color: transparent; }
+.graph-wrap { border-radius: 16px; }
+.field { margin-bottom: var(--s3); }
+.field > span, .alert-title, details summary, .sliders label, .range-row, .threshold, .planned { font-family: var(--label); }
+
+/* headings get the display face */
+h1 { font: 600 34px/1.15 var(--display); letter-spacing: -0.015em; }
+h2, .drawer-sub, .pop-head h2 { font: 600 17px/1.3 var(--display); letter-spacing: -0.005em; }
+.title-input { font: 600 19px var(--display); }
+.jcard-main h3, .char-head h3 { font-family: var(--display); font-weight: 600; }
+.prose { font-family: var(--prose, var(--font)); font-size: 15px; line-height: 1.75; }
+.prose h2, .prose h3, .prose h4 { font-family: var(--display); font-size: 16px; font-weight: 600; }
+.badge { height: 30px; display: inline-flex; align-items: center; padding: 0 12px; font-size: 12px; font-weight: 600; }
+.planned input { width: 64px; text-align: center; padding: 0 8px; }
+.place, .row label { font-size: 12.5px; }
+.home-head .actions, dialog .actions { gap: var(--s1); }
+.home-head .actions button, dialog .actions button { height: var(--ctl); min-height: var(--ctl); padding: 0 18px; font-size: 13.5px; }

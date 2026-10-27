@@ -1,0 +1,15 @@
+/* Dark mode, Night desk: the paper look after dark. Ink background, paper text, vermilion lamp. */
+:root[data-theme='dark'] {
+  --bg: #1b1a17; --bg2: #24231f; --card: #2a2925; --card2: #34322d;
+  --ink: #f4efe5; --ink-dim: rgba(244, 239, 229, 0.78); --muted: #a39d8c; --head: #f4efe5;
+  --brand: #ff4a1c; --brand2: #ff6a40; --on-brand: #fff;
+  --amber: #d9e65a; --green: #b5c94a; --red: #ff7a5c;
+  --border: rgba(244, 239, 229, 0.2); --border2: rgba(244, 239, 229, 0.07); --border2-solid: #3a3832;
+  --chip: #3a3832; --node-bg: #2a2925; --node-border: #f4efe5; --node-font: #f4efe5; --edge-order: #6f6a5d;
+  --branch-bg: #34331f; --break-bg: #3d2420;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 28px rgba(0, 0, 0, 0.28);
+  color-scheme: dark;
+}
+:root[data-theme='dark'] .tab .count { color: #fff; }
+:root[data-theme='dark'] .tab.active, :root[data-theme='dark'] .mode-switch button.on { color: #20201d; }
+:root[data-theme='dark'] .health.ok, :root[data-theme='dark'] .health.wander, :root[data-theme='dark'] .health.drift { color: var(--ink); background: var(--card2); }
