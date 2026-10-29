@@ -626,19 +626,28 @@
     return ends;
   }
 
-  // Terminancy is the side path's, so its one note sits on the path's last Footstep.
-  // Drifting has no note: the path just fades as its sector grows.
+  // Terminancy is the side path's, so its notes sit on the path's last Footstep.
+  // On a side path, "drifting" lives only in this note, which says plainly that the
+  // path is being let drift; the path also fades as its sector grows.
   function syncTerminancy() {
     const ends = pathEnds();
     journey.alerts
-      .filter((a) => a.open && a.kind === 'terminate' && fsById(a.fsId))
+      .filter((a) => a.open && ['terminate', 'drifting'].includes(a.kind) && fsById(a.fsId))
       .forEach((a) => {
         const f = fsById(a.fsId);
-        if (f.thread !== 'branch' || ends[pathStart(f).id] !== f) a.open = false;
+        if (f.thread !== 'branch' || ends[pathStart(f).id] !== f || f.metrics?.branch !== a.kind) a.open = false;
       });
     Object.values(ends).forEach((f) => {
       const t = f.metrics?.terminancy;
-      if (!t || f.metrics.branch !== 'terminate' || pathStart(f).ended) return;
+      if (!t || pathStart(f).ended || pathStart(f).letDrift === f.id) return;
+      if (f.metrics.branch === 'drifting')
+        return addNote({
+          kind: 'drifting',
+          fsId: f.id,
+          text: `The side path ending at ${f.id} is drifting from the main story. Kahyo is letting it drift and fading it as it goes. Keep letting it drift, or lean its next step back toward the story.`,
+          maths: '',
+        });
+      if (f.metrics.branch !== 'terminate') return;
       addNote({
         kind: 'terminate',
         fsId: f.id,
@@ -648,17 +657,18 @@
     });
   }
 
-  // Story drift: of the last six Footsteps written, if half or more are side
-  // paths or off course, the story is wandering from its main line.
+  // Story drift: of the last six main Footsteps, if half or more are drifting
+  // or off course, the main story is drifting.
   const DRIFT_WINDOW = 6;
   const DRIFT_SHARE = 0.5;
   function recentOffCourse() {
+    // Drifting is the main story's word: side paths are a choice, so they never count.
     const recent = journey.footsteps
-      .filter((f) => f.thread !== 'archived')
+      .filter((f) => f.thread === 'main')
       .sort((a, b) => a.created_at - b.created_at)
       .slice(-DRIFT_WINDOW);
-    const off = recent.filter((f) => f.thread === 'branch' || f.metrics?.dirStatus === 'off');
-    const wander = recent.filter((f) => f.thread === 'main' && ['wander', 'drifting'].includes(f.metrics?.dirStatus));
+    const off = recent.filter((f) => ['drifting', 'off'].includes(f.metrics?.dirStatus));
+    const wander = recent.filter((f) => f.metrics?.dirStatus === 'wander');
     return { recent, off, wander, drifting: recent.length >= 4 && off.length >= 3 && off.length / recent.length >= DRIFT_SHARE };
   }
 
@@ -666,8 +676,8 @@
   function storyHealth() {
     const { recent, off, wander, drifting } = recentOffCourse();
     if (recent.length < 3) return { level: 'quiet', label: 'Just starting', why: 'Kahyo judges direction from the 4th Footstep on.' };
-    if (drifting) return { level: 'drift', label: 'Drifting', why: `${off.length} of your last ${recent.length} Footsteps are side paths or off course.` };
-    if (off.length + wander.length >= 2) return { level: 'wander', label: 'Wandering a little', why: `${off.length + wander.length} of your last ${recent.length} Footsteps wander or branch off.` };
+    if (drifting) return { level: 'drift', label: 'Drifting', why: `${off.length} of your last ${recent.length} main Footsteps are drifting or off course.` };
+    if (off.length + wander.length >= 2) return { level: 'wander', label: 'Wandering a little', why: `${off.length + wander.length} of your last ${recent.length} main Footsteps wander from where the story is heading.` };
     return { level: 'ok', label: 'On course', why: `Your last ${recent.length} Footsteps follow the main story.` };
   }
 
@@ -683,7 +693,7 @@
       id: 'a' + uid(),
       kind: 'drift',
       fsId: off[off.length - 1].id,
-      text: `${off.length} of your last ${recent.length} Footsteps wander away from the main story (${off.map((f) => f.id).join(', ')}). Is that on purpose? If not, bring the next idea back to the main line.`,
+      text: `${off.length} of your last ${recent.length} main Footsteps drift away from where the story is heading (${off.map((f) => f.id).join(', ')}). Is that on purpose? If not, bring the next idea back to the main line.`,
       maths: `${off.length} of ${recent.length} recent Footsteps`,
       open: true,
       created: Date.now(),
@@ -939,6 +949,8 @@
         .filter((x) => x.open && ['drifting', 'terminate', 'branch'].includes(x.kind) && fsById(x.fsId) && pathStart(fsById(x.fsId)) === start)
         .forEach((x) => ((x.open = false), (x.resolution = 'end')));
     }
+    // Letting a side path drift is the writer's choice: no more drift note until it grows.
+    if (action === 'drift' && fs) pathStart(fs).letDrift = fs.id;
     if (action === 'dismiss') journey.driftDismissedAt = journey.footsteps.length;
     if (action === 'relax') {
       const c = character(a.character);
@@ -980,7 +992,7 @@
         groups[groups.length - 1].items.push(`${i + 1}. **${f.event}**${f.context ? ` (${f.context})` : ''}`);
       });
       journey.draft =
-        `# ${journey.title}\n\n_Helper outline from your Footsteps. Add an AI key in Settings for a prose scaffold._\n\n` +
+        `# ${journey.title}\n\n_Helper outline from your Footsteps. Add an AI key in AI config for a prose scaffold._\n\n` +
         groups.map((g) => `## ${g.key}\n\n${g.items.join('\n')}`).join('\n\n') +
         (journey.characters.length ? `\n\n## Characters\n\n${journey.characters.map((c) => `- **${c.name}**${c.physical.length ? `: ${c.physical.join(', ')}` : ''}`).join('\n')}` : '') +
         (branches.length ? `\n\n## Side paths you explored\n\n${branches.map((f) => `- ${f.event}`).join('\n')}` : '');
@@ -1116,7 +1128,7 @@
   // ---------- rendering ----------
 
   function renderBadge() {
-    $('#mode-badge').textContent = LLM.hasKey() ? LLM.providerLabel() : 'Offline mode';
+    $('#mode-badge').textContent = LLM.hasKey() ? LLM.providerLabel() : 'No-AI mode';
     $('#mode-badge').className = 'badge ' + (LLM.hasKey() ? 'on' : 'off');
   }
 
@@ -1604,6 +1616,8 @@
         return b('split', 'Split in two') + b('accept', 'Keep as one');
       case 'repeat':
         return b('remove', 'Delete this one') + b('accept', 'Keep both');
+      case 'drifting':
+        return b('drift', 'Let it drift') + b('change', 'Lean it back');
       case 'terminate':
         return b('end', 'Let it end here') + b('change', 'Change its steps') + b('accept', 'Keep going');
       case 'trait':
@@ -2120,7 +2134,7 @@
         freezeMic();
         const text = $('#transcript').value;
         if (!text.trim()) return setStatus('Speak or type a story idea first.', 'warn');
-        setStatus(LLM.hasKey() ? 'Understanding where this goes in your story…' : 'Structuring (offline mode)…');
+        setStatus(LLM.hasKey() ? 'Understanding where this goes in your story…' : 'Structuring (No-AI mode)…');
         remember('add a Footstep');
         await addThought(text, null, $('#place').value);
         $('#transcript').value = '';
@@ -2451,6 +2465,7 @@
     $('#theme-btn').addEventListener('click', () => setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
     $('#settings-btn').addEventListener('click', openSettings);
     $('#m-settings').addEventListener('click', openSettings);
+    ['#m-learn', '#h-learn'].forEach((s) => $(s).addEventListener('click', () => (location.href = 'learn.html')));
     $('#settings-save').addEventListener('click', () => {
       const provider = $('#provider').value;
       const before = LLM.settings();
@@ -2471,7 +2486,7 @@
         await rescoreAll();
         save();
         renderAll();
-        setStatus(LLM.hasKey() ? `${LLM.providerLabel()} connected. Kahyo will now extract Footsteps with AI.` : 'Offline mode. Footsteps are split by sentence.', 'ok');
+        setStatus(LLM.hasKey() ? `${LLM.providerLabel()} connected. Kahyo will now extract Footsteps with AI.` : 'No-AI mode. Footsteps are split by sentence.', 'ok');
       });
     });
     $('#settings-clear').addEventListener('click', () => {

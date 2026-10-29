@@ -49,12 +49,13 @@ tests/              node --test tests/nsmm.test.js
 
 ## Privacy
 
-Your Journey and API key stay in your browser. When a key is set, transcripts are sent to that AI provider for processing. On free tiers, providers may use that data to improve their products, so don't paste anything confidential.
+Your Journeys and API key are stored in your browser. When a key is set, Kahyo's server passes it with each AI call to your provider and never stores it, and transcripts are sent to that provider for processing. On free tiers, providers may use that data to improve their products, so don't paste anything confidential.
 
 ## Journey view
 
 - **Home** lists every Journey saved in this browser (no sign-in yet).
 - **Write**: speak, the story map (a click only highlights a Footstep), a story-health pill, and the right pane with **Notes** (they stay until you clear them) and **Draft**. The pane folds away with ».
+- **Learn**: learn.html, a guide with annotated screenshots of every part (Menu → Learn, or Learn on the home page). Screenshots live in assets/learn/.
 - **Inspect**: the right pane becomes **Footstep** (the selected Footstep, its values and notes) and **Storyline** (terminancy factor, planned length, stats and the side-path limit).
 - **Graph**: on course climbs at 35°; each Footstep's line turns from that by its direction, its length is the magnitude, its circle size the intensity. Side paths are dashed.
 - **AI**: any provider (Gemini, Claude, Groq, OpenAI, OpenRouter or another OpenAI-compatible API). Claude runs through the official Anthropic SDK on the server. Claude has no embeddings, so embeddings come from Gemini (an optional second key), or offline ones.

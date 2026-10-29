@@ -65,7 +65,7 @@
   // Runs one AI task on Kahyo's server, which holds the prompts and calls the
   // writer's provider with their key (sent for this call only, never stored).
   async function run(task, data) {
-    if (!hasKey()) throw new Error('No AI key set. Open Settings to add one.');
+    if (!hasKey()) throw new Error('No AI key set. Open AI config to add one.');
     const s = settings();
     let res;
     try {
@@ -90,7 +90,7 @@
 
   // Embeddings go straight to Gemini: they carry no Kahyo maths.
   async function gemini(model, method, body, key) {
-    if (!key) throw new Error('No Gemini key set. Open Settings to add one.');
+    if (!key) throw new Error('No Gemini key set. Open AI config to add one.');
     for (let i = 0; ; i++) {
       const res = await fetch(`${GEMINI}${model}:${method}`, {
         method: 'POST',
@@ -107,7 +107,7 @@
         await new Promise((r) => setTimeout(r, i ? 5000 : 2000));
         continue;
       }
-      if (res.status === 401 || res.status === 403) msg = `Gemini refused the embedding key. Check it in Settings. (${msg})`;
+      if (res.status === 401 || res.status === 403) msg = `Gemini refused the embedding key. Check it in AI config. (${msg})`;
       throw new Error(msg);
     }
   }

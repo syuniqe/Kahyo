@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Learn Kahyo</title>
+<link rel="icon" type="image/png" href="assets/kahyo-mark-256.png" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" />
+<style>
+:root { --bg:#f3eee4; --card:#fbf8f2; --ink:#2a1650; --muted:#6f6688; --line:#e2dacb; --brand:#fd3a0a; --citron:#dfe66a; --lilac:#9b72d9; color-scheme:light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#120c22; --card:#1c1434; --ink:#f3e9a6; --muted:#b3a8cf; --line:#2f2550; color-scheme:dark; } }
+:root[data-theme="dark"] { --bg:#120c22; --card:#1c1434; --ink:#f3e9a6; --muted:#b3a8cf; --line:#2f2550; color-scheme:dark; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.6 Manrope, system-ui, sans-serif; }
+header { position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:16px; padding:12px 24px; background:color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter:blur(8px); border-bottom:1px solid var(--line); }
+header img { height:30px; }
+header .back { margin-left:auto; padding:8px 16px; border:1px solid var(--line); border-radius:999px; color:var(--ink); text-decoration:none; font-weight:600; }
+nav.toc { display:flex; flex-wrap:wrap; gap:8px; max-width:1100px; margin:24px auto 0; padding:0 24px; }
+nav.toc a { padding:6px 14px; border-radius:999px; background:var(--card); border:1px solid var(--line); color:var(--ink); text-decoration:none; font-size:13px; font-weight:600; }
+main { max-width:1100px; margin:0 auto; padding:8px 24px 80px; }
+h1 { font-family:Fraunces, serif; font-weight:600; font-size:38px; line-height:1.15; margin:28px 0 8px; }
+.lead { font-size:17px; color:var(--muted); max-width:720px; margin:0; }
+.sec { margin-top:48px; padding:28px; background:var(--card); border:1px solid var(--line); border-radius:24px; }
+h2 { font-family:Fraunces, serif; font-weight:600; font-size:24px; margin:0 0 6px; display:flex; align-items:center; gap:12px; }
+.num { display:inline-grid; place-items:center; width:32px; height:32px; border-radius:50%; background:var(--citron); color:#2a1650; font:700 15px Manrope, sans-serif; flex:none; }
+.intro { color:var(--muted); margin:0 0 20px; }
+.body { display:grid; gap:24px; }
+.narrow .body { grid-template-columns:minmax(0, 360px) 1fr; align-items:start; }
+.shot { position:relative; margin:0; border-radius:14px; overflow:hidden; border:1px solid var(--line); box-shadow:0 10px 30px rgba(42,22,80,.10); }
+.shot img { display:block; width:100%; height:100%; object-fit:cover; }
+.pin { position:absolute; border:2px solid var(--brand); border-radius:10px; box-shadow:0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent); pointer-events:none; }
+.pin b { position:absolute; left:-12px; top:-12px; width:24px; height:24px; border-radius:50%; background:var(--brand); color:#fff; display:grid; place-items:center; font-size:12px; box-shadow:0 2px 6px rgba(0,0,0,.25); }
+.keys { margin:0; padding-left:0; list-style:none; counter-reset:k; display:grid; gap:10px; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); }
+.narrow .keys { grid-template-columns:1fr; }
+.keys li { counter-increment:k; position:relative; padding-left:36px; }
+.keys li::before { content:counter(k); position:absolute; left:0; top:1px; width:24px; height:24px; border-radius:50%; background:var(--brand); color:#fff; display:grid; place-items:center; font-size:12px; font-weight:700; }
+.map-key { display:grid; gap:12px; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); margin-top:20px; }
+.map-key div { display:flex; gap:12px; align-items:flex-start; padding:12px; border-radius:14px; background:var(--bg); }
+.map-key svg { flex:none; }
+dl.words { display:grid; grid-template-columns:minmax(140px, 200px) 1fr; gap:10px 20px; margin:0; }
+dl.words dt { font-weight:700; }
+dl.words dd { margin:0; color:var(--ink); }
+.phone { display:grid; grid-template-columns:minmax(0, 260px) 1fr; gap:24px; align-items:center; }
+.phone img { width:100%; border-radius:24px; border:1px solid var(--line); }
+@media (max-width:760px) {
+  header { padding:10px 16px; } nav.toc, main { padding-left:16px; padding-right:16px; }
+  h1 { font-size:30px; } .sec { padding:18px; border-radius:18px; }
+  .narrow .body, .phone, dl.words { grid-template-columns:1fr; }
+  .pin b { width:18px; height:18px; font-size:10px; left:-9px; top:-9px; }
+}
+</style>
+</head>
+<body>
+<header><img src="assets/kahyo-wordmark.png" alt="Kahyo" /><a class="back" href="./">Open Kahyo</a></header>
+<nav class="toc"><a href="#home">Your Journeys</a><a href="#write">Write</a><a href="#map">Reading the story map</a><a href="#notes">Notes</a><a href="#inspect">Inspect</a><a href="#storyline">Storyline</a><a href="#aiconfig">AI config</a><a href="#phone">Phone</a><a href="#words">Words</a></nav>
+<main>
+<h1>Learn Kahyo</h1>
+<p class="lead">Kahyo turns your spoken or typed ideas into a map of your story. It quietly notices when the story wanders, when too much or too little happens, and when a side path goes too far, so you can decide what to do. Every screenshot below is numbered; the list beside it explains each part.</p>
+<section id="home" class="sec"><h2><span class="num">1</span>Your Journeys</h2><p class="intro">Each Journey is one story. Everything is saved in this browser for now (accounts are coming).</p>
+<div class="body"><figure class="shot" style="aspect-ratio:1.6"><img src="assets/learn/home.jpg" alt="Your Journeys" /><span class="pin" style="left:79.82%;top:20.56%;width:8.37%;height:4.22%"><b>1</b></span><span class="pin" style="left:67.6%;top:20.56%;width:11.67%;height:4.22%"><b>2</b></span><span class="pin" style="left:55.72%;top:20.56%;width:5.61%;height:4.22%"><b>3</b></span><span class="pin" style="left:61.89%;top:20.56%;width:5.16%;height:4.22%"><b>4</b></span><span class="pin" style="left:11.81%;top:28.78%;width:24.44%;height:23.42%"><b>5</b></span></figure><ol class="keys"><li><b>New Journey</b> starts a story. Give it a title and a planned length (how many Footsteps you expect, usually 50 to 100).</li><li><b>Sample story</b> opens <i>The Salt Road</i>, a finished example that shows every feature.</li><li><b>Import</b> brings back a Journey you exported as a .json file.</li><li><b>Learn</b> opens this page.</li><li><b>A saved Journey</b>. Click it to keep writing. Its card shows how far the story has got.</li></ol></div></section><section id="write" class="sec"><h2><span class="num">2</span>Write: add your story one idea at a time</h2><p class="intro">Write is the calm view. Speak or type an idea, and Kahyo turns it into a <b>Footstep</b> on the map.</p>
+<div class="body"><figure class="shot" style="aspect-ratio:1.6"><img src="assets/learn/write.jpg" alt="Write: add your story one idea at a time" /><span class="pin" style="left:3.96%;top:24.23%;width:20.14%;height:5.33%"><b>1</b></span><span class="pin" style="left:3.96%;top:36.01%;width:20.14%;height:16.67%"><b>2</b></span><span class="pin" style="left:7.42%;top:53.79%;width:16.68%;height:3.33%"><b>3</b></span><span class="pin" style="left:3.96%;top:58.23%;width:20.14%;height:4.89%"><b>4</b></span><span class="pin" style="left:2.22%;top:90.22%;width:23.61%;height:6.22%"><b>5</b></span><span class="pin" style="left:60.36%;top:13.78%;width:7.63%;height:3.56%"><b>6</b></span><span class="pin" style="left:29.24%;top:18.89%;width:38.75%;height:66.18%"><b>7</b></span><span class="pin" style="left:29.24%;top:86.84%;width:38.75%;height:3.29%"><b>8</b></span><span class="pin" style="left:72.92%;top:13.44%;width:10.14%;height:3.56%"><b>9</b></span><span class="pin" style="left:83.33%;top:13.44%;width:10.14%;height:3.56%"><b>10</b></span><span class="pin" style="left:62.44%;top:2%;width:10.75%;height:4.22%"><b>11</b></span><span class="pin" style="left:84.61%;top:2%;width:6.54%;height:4.22%"><b>12</b></span></figure><ol class="keys"><li><b>Speak</b> turns on the mic. Talk naturally; filler words are dropped.</li><li><b>Type or fix</b>. The mic's words land here. Fix anything it got wrong; while you type, the mic pauses so your fix stays.</li><li><b>Place it</b> chooses where the idea goes: at the end, right after a Footstep, or continuing a side path.</li><li><b>Add to Journey</b> makes the Footstep. One idea becomes one Footstep; if you said two things, Kahyo offers to split them.</li><li><b>Characters</b> lists everyone in the story, with their traits and looks. Kahyo warns when someone acts out of character.</li><li><b>Story pill</b> tells you, in one word, how the main story is going: On course, Wandering a little, or Drifting. Side paths never count here.</li><li><b>Story map</b> draws every Footstep. See the next section.</li><li><b>Stages</b>: Origin, Pandiculation, Maxspan, Convergence and Conclusion. They appear once enough Footsteps exist.</li><li><b>Notes</b> are Kahyo's quiet comments. They never interrupt you, and stay until you clear them.</li><li><b>Draft</b> builds a scene-by-scene helper draft from your main story.</li><li><b>Write / Inspect</b> switches between the calm view and the detailed view.</li><li><b>AI config</b> is where you add an AI key. Without one, Kahyo runs in No-AI mode.</li></ol></div></section>
+<section id="map" class="sec narrow"><h2><span class="num">3</span>Reading the story map</h2><p class="intro">The map is your story as a path. Each circle is a Footstep and each line joins two of them.</p>
+<div class="body"><figure class="shot" style="aspect-ratio:0.7591"><img src="assets/learn/map.jpg" alt="Reading the story map" /><span class="pin" style="left:77.82%;top:3.12%;width:18.06%;height:4%"><b>1</b></span><span class="pin" style="left:86.83%;top:10.11%;width:7.41%;height:3.75%"><b>2</b></span><span class="pin" style="left:4.11%;top:72.16%;width:91.78%;height:3.7%"><b>3</b></span><span class="pin" style="left:4.11%;top:80.83%;width:91.78%;height:12.06%"><b>4</b></span></figure><ol class="keys"><li><b>Story pill</b>. Click it to see why it says what it says.</li><li><b>Fit</b> zooms to show the whole Journey. Drag to move, scroll or pinch to zoom.</li><li><b>Stages</b> show how far along the story is, with how many Footsteps are in each.</li><li><b>How to read it</b> opens the legend: what each line and ring means.</li></ol></div><div class="map-key">
+<div><svg width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="8" fill="#fff" stroke="#3b1c7a" stroke-width="2"/><circle cx="22" cy="22" r="16" fill="none" stroke="#3b1c7a" stroke-width="1" stroke-dasharray="2 3" opacity=".5"/></svg><span><b>Circle size</b> is how big the event is: a death or a betrayal is bigger than a walk to the market.</span></div>
+<div><svg width="44" height="44" viewBox="0 0 44 44"><line x1="4" y1="34" x2="40" y2="10" stroke="#8f86a8" stroke-width="3"/></svg><span><b>Line length</b> is how much happens in the step. A long line is a lot at once.</span></div>
+<div><svg width="44" height="44" viewBox="0 0 44 44"><line x1="4" y1="38" x2="22" y2="22" stroke="#8f86a8" stroke-width="3"/><line x1="22" y1="22" x2="42" y2="22" stroke="#8f86a8" stroke-width="3"/></svg><span><b>Turns</b> show direction. When the story keeps its heading the path climbs steadily; a sharp turn means the idea goes somewhere new.</span></div>
+<div><svg width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="9" fill="#fff" stroke="#9b72d9" stroke-width="4"/><circle cx="22" cy="22" r="15" fill="none" stroke="#9b72d9" stroke-width="5" opacity=".25"/></svg><span><b>Lilac glow</b>: off course. A thin lilac ring means wandering or drifting.</span></div>
+<div><svg width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="9" fill="#fbf1d8" stroke="#b7791f" stroke-width="3" stroke-dasharray="5 3"/></svg><span><b>Dashed amber circle</b>: a side path, a "what if" that leaves the main story. It fades as it wanders further.</span></div>
+<div><svg width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="10" fill="#fff" stroke="#FD3A0A" stroke-width="4" stroke-dasharray="3 3"/></svg><span><b>Thick orange dotted ring</b>: a Jump, where a lot happens at once.</span></div>
+<div><svg width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="9" fill="#fbe3e1" stroke="#c8433f" stroke-width="3"/></svg><span><b>Red ring</b>: a character acts against one of their traits.</span></div>
+<div><svg width="44" height="44" viewBox="0 0 44 44"><path d="M4 30 Q22 4 40 30" fill="none" stroke="#c8433f" stroke-width="2"/></svg><span><b>Curved coloured links</b> join setups and payoffs: causes, character arcs and more. Click a link to delete it.</span></div>
+</div></section>
+<section id="notes" class="sec narrow"><h2><span class="num">4</span>Notes: Kahyo's quiet comments</h2><p class="intro">Each note names a Footstep, says what Kahyo noticed, and gives you the choice. You are always the author.</p>
+<div class="body"><figure class="shot" style="aspect-ratio:0.5"><img src="assets/learn/notes.jpg" alt="Notes: Kahyo's quiet comments" /><span class="pin" style="left:6.58%;top:9.87%;width:86.84%;height:29.38%"><b>1</b></span><span class="pin" style="left:7.63%;top:28.59%;width:84.74%;height:8.68%"><b>2</b></span><span class="pin" style="left:6.58%;top:39.25%;width:86.84%;height:18.35%"><b>3</b></span><span class="pin" style="left:6.58%;top:57.6%;width:86.84%;height:21.5%"><b>4</b></span></figure><ol class="keys"><li><b>Side path at its limit</b>. A side path has wandered so wide from the main story it would be hard to bring back. It appears once, on the path's last Footstep.</li><li><b>Your choice</b>: let it end there, change its steps, or keep going anyway.</li><li><b>Repeat</b>. This Footstep says much the same as an earlier one. Delete it or keep both.</li><li><b>Jump</b>. A lot happens at once. Split it, or keep it as one big step.</li></ol></div></section><section id="inspect" class="sec"><h2><span class="num">5</span>Inspect: one Footstep up close</h2><p class="intro">Click any circle on the map. Inspect shows that Footstep's details, which you can edit.</p>
+<div class="body"><figure class="shot" style="aspect-ratio:1.6"><img src="assets/learn/inspect.jpg" alt="Inspect: one Footstep up close" /><span class="pin" style="left:72.92%;top:13.44%;width:10.14%;height:3.56%"><b>1</b></span><span class="pin" style="left:83.33%;top:13.44%;width:10.14%;height:3.56%"><b>2</b></span><span class="pin" style="left:73.13%;top:22.68%;width:22.92%;height:118.35%"><b>3</b></span></figure><ol class="keys"><li><b>Footstep</b> tab: the selected Footstep.</li><li><b>Storyline</b> tab: the whole story's settings and numbers.</li><li><b>Its packet</b>: what happens, who, where, when and how, and setups to pay off later. Edit any field; Kahyo re-reads it.</li></ol></div></section><section id="storyline" class="sec"><h2><span class="num">6</span>Storyline: the whole story</h2><p class="intro">Settings and numbers for the whole Journey.</p>
+<div class="body"><figure class="shot" style="aspect-ratio:1.6"><img src="assets/learn/storyline.jpg" alt="Storyline: the whole story" /><span class="pin" style="left:73.13%;top:19.33%;width:22.92%;height:7.24%"><b>1</b></span><span class="pin" style="left:73.26%;top:33.76%;width:18.89%;height:2%"><b>2</b></span><span class="pin" style="left:73.13%;top:50.69%;width:5%;height:3.33%"><b>3</b></span><span class="pin" style="left:73.13%;top:55.8%;width:22.92%;height:27.43%"><b>4</b></span></figure><ol class="keys"><li><b>Why the pill says this</b>, in plain words.</li><li><b>Terminancy factor</b> sets how lenient Kahyo is. It is automatic from the planned length (longer stories are more lenient); drag to override.</li><li><b>Planned length</b> is how many Footsteps you expect. It sets when stages appear.</li><li><b>Story numbers</b>: Footsteps on the main story, side paths, open notes, Jumps and Crawls, and more.</li></ol></div></section><section id="aiconfig" class="sec"><h2><span class="num">7</span>AI config</h2><p class="intro">Kahyo works without AI, but an AI key makes it understand your story much better.</p>
+<div class="body"><figure class="shot" style="aspect-ratio:1.6"><img src="assets/learn/aiconfig.jpg" alt="AI config" /><span class="pin" style="left:34.93%;top:48.5%;width:30.14%;height:4.22%"><b>1</b></span><span class="pin" style="left:34.93%;top:60.23%;width:30.14%;height:4.22%"><b>2</b></span><span class="pin" style="left:34.93%;top:68.21%;width:30.14%;height:4.22%"><b>3</b></span><span class="pin" style="left:60.27%;top:74.21%;width:4.8%;height:4.22%"><b>4</b></span></figure><ol class="keys"><li><b>AI provider</b>: Google Gemini or Groq (both have free keys), Claude, OpenAI, OpenRouter, or another compatible service.</li><li><b>Your key</b> is stored only in this browser. Kahyo's server passes it to your provider for each call and never keeps it.</li><li><b>Model</b>: leave it empty to use the default.</li><li><b>Save</b>. The badge at the top changes from No-AI mode to your provider's name.</li></ol></div></section>
+<section id="phone" class="sec"><h2><span class="num">8</span>On a phone</h2>
+<div class="phone"><img src="assets/learn/phone.jpg" alt="Kahyo on a phone" /><div><p>Kahyo works on a phone too. The map sits above the writing box. Pinch to zoom the map, and tap a circle to select it.</p><p><b>Undo</b> (↶, or Ctrl+Z on a computer) takes back your last change: an add, a delete, a split or an edit.</p><p>To delete a Footstep, select it and press Delete or Backspace, or use the Footstep panel in Inspect.</p></div></div></section>
+<section id="words" class="sec"><h2><span class="num">9</span>Words Kahyo uses</h2>
+<dl class="words">
+<dt>Journey</dt><dd>One story, from first idea to the end.</dd>
+<dt>Footstep</dt><dd>One idea: one thing that happens. Named FS#001, FS#002 and so on.</dd>
+<dt>Main story</dt><dd>The line your story follows from start to end.</dd>
+<dt>Side path</dt><dd>A "what if" that leaves the main story. It can continue, end, or come back into the main story.</dd>
+<dt>Sub-path</dt><dd>A side path that leaves another side path.</dd>
+<dt>On course</dt><dd>The Footstep keeps heading where the story was going.</dd>
+<dt>Wandering</dt><dd>It turns a little away.</dd>
+<dt>Drifting</dt><dd>It turns further away. On the main story only; a side path that drifts gets a note saying Kahyo is letting it drift.</dd>
+<dt>Off course</dt><dd>It turns past the limit for this stage of the story.</dd>
+<dt>Branch it?</dt><dd>Kahyo suggests turning a Footstep into a side path when a lot happens in a strange direction.</dd>
+<dt>Jump and Crawl</dt><dd>A Jump is far more happening than usual in one step; a Crawl is far less.</dd>
+<dt>Intensity</dt><dd>How big the event is (circle size).</dd>
+<dt>Terminancy</dt><dd>How far a side path can wander before it would be too hard to bring back. Later stages of the story are stricter.</dd>
+<dt>Stages</dt><dd>Origin, Pandiculation (the story stretches open), Maxspan (it is at its widest), Convergence (threads pull together), Conclusion.</dd>
+<dt>No-AI mode</dt><dd>Kahyo without an AI key: one Footstep per sentence and simpler checks. It still needs internet.</dd>
+</dl></section>
+</main>
+<script>
+try { const t = localStorage.getItem('kahyo.theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
+</body>
+</html>

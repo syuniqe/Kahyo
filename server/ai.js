@@ -47,7 +47,7 @@ async function failure(res, model, label) {
   } catch {}
   if (isBusy(res.status, msg)) msg = `${model} is busy right now (high demand). Kahyo tried again and tried another model; wait a minute and press Add again. (${msg})`;
   else if (res.status === 429) msg = 'Rate limit reached. Wait a minute and try again. (' + msg + ')';
-  if (res.status === 401 || res.status === 403) msg = `${label} refused the key. Check it in Settings. (${msg})`;
+  if (res.status === 401 || res.status === 403) msg = `${label} refused the key. Check it in AI config. (${msg})`;
   const err = new Error(msg);
   err.status = res.status;
   err.model = model;
@@ -132,10 +132,10 @@ async function claudeRun(cfg, prompt) {
     });
   } catch (e) {
     if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) {
-      throw Object.assign(new Error(`Claude refused the key. Check it in Settings. (${e.message})`), { status: e.status });
+      throw Object.assign(new Error(`Claude refused the key. Check it in AI config. (${e.message})`), { status: e.status });
     }
     if (e instanceof Anthropic.RateLimitError) throw Object.assign(new Error(`Rate limit reached. Wait a minute and try again. (${e.message})`), { status: 429 });
-    if (e instanceof Anthropic.NotFoundError) throw Object.assign(new Error(`Claude has no model called ${model}. Pick another in Settings. (${e.message})`), { status: 404 });
+    if (e instanceof Anthropic.NotFoundError) throw Object.assign(new Error(`Claude has no model called ${model}. Pick another in AI config. (${e.message})`), { status: 404 });
     if (e instanceof Anthropic.InternalServerError) throw Object.assign(new Error(`Claude is busy right now. Wait a minute and press Add again. (${e.message})`), { status: e.status });
     if (e instanceof Anthropic.APIError) throw Object.assign(new Error(e.message), { status: e.status || 502 });
     throw e;
@@ -188,7 +188,7 @@ async function chatRun(cfg, prompt, opts) {
 // cfg: { provider, model, baseUrl, key }. task: { prompt, schema?, temperature? }.
 export async function runTask(cfg, task) {
   const provider = PROVIDERS[cfg.provider] ? cfg.provider : 'gemini';
-  if (!cfg.key) throw Object.assign(new Error('No AI key set. Open Settings to add one.'), { status: 400 });
+  if (!cfg.key) throw Object.assign(new Error('No AI key set. Open AI config to add one.'), { status: 400 });
   const json = Boolean(task.schema);
   const prompt = json ? task.prompt + '\n\nReturn JSON only, matching:\n' + task.schema : task.prompt;
   let out;
@@ -206,7 +206,7 @@ export async function runTask(cfg, task) {
     out = await claudeRun(cfg, prompt);
   } else {
     const base = (provider === 'custom' ? cfg.baseUrl || '' : PROVIDERS[provider].base).replace(/\/+$/, '');
-    if (!/^https:\/\//.test(base)) throw Object.assign(new Error('Set an https base URL for the custom provider in Settings.'), { status: 400 });
+    if (!/^https:\/\//.test(base)) throw Object.assign(new Error('Set an https base URL for the custom provider in AI config.'), { status: 400 });
     out = await chatRun({ ...cfg, provider, base, label: PROVIDERS[provider].label }, prompt, { json, temperature: json ? 0.2 : task.temperature });
   }
   return { result: json ? parseJSON(out.text) : out.text, model: out.model || null };

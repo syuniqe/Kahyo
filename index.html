@@ -36,12 +36,13 @@
     </div>
     <span id="mode-badge" class="badge"></span>
     <button id="theme-btn" class="ghost theme-btn" aria-label="Switch light or dark mode" title="Light / dark"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2v16a8 8 0 0 1 0-16z"/></svg></button>
-    <button id="settings-btn" class="ghost">Settings</button>
+    <button id="settings-btn" class="ghost">AI config</button>
     <button id="menu-btn" class="ghost journey-only" aria-haspopup="true">Menu ▾</button>
     <div id="menu" class="menu" hidden>
       <button id="m-export">Export Journey (.json)</button>
       <button id="m-delete">Delete this Journey</button>
-      <button id="m-settings">Settings</button>
+      <button id="m-settings">AI config</button>
+      <button id="m-learn">Learn</button>
     </div>
     <input id="import-file" type="file" hidden />
   </header>
@@ -55,6 +56,7 @@
       </div>
       <div class="actions">
         <button id="h-import" class="ghost">Import</button>
+        <button id="h-learn" class="ghost">Learn</button>
         <button id="h-sample" class="ghost">Try the sample story</button>
         <button id="h-new" class="primary">New Journey</button>
       </div>
@@ -173,8 +175,8 @@
   </div>
 
   <dialog id="settings">
-    <h2>Settings</h2>
-    <p>Kahyo runs free. Without a key it works in <strong>offline mode</strong>: one Footstep per sentence and simple local meaning checks. For AI extraction, placement, stage labels and drafts, add a key from any AI provider. Keys are stored only in this browser. Kahyo's server passes each one to that provider for the one call and never keeps it.</p>
+    <h2>AI config</h2>
+    <p>Kahyo runs free. Without a key it works in <strong>No-AI mode</strong>: one Footstep per sentence and simple local meaning checks (it still needs internet, because Kahyo's engine runs on its server). For AI extraction, placement, stage labels and drafts, add a key from any AI provider. Keys are stored only in this browser. Kahyo's server passes each one to that provider for the one call and never keeps it.</p>
     <label>AI provider
       <select id="provider">
         <option value="gemini">Google Gemini (free key)</option>
