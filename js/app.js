@@ -47,7 +47,6 @@
       stage: null,
       plannedLength: NSMM.DEFAULT_PLANNED_LENGTH,
       tf: null, // null = automatic from the planned length
-      branchShare: NSMM.DEFAULT_BRANCH_SHARE,
       embedder: null,
       footsteps: [],
       edges: [],
@@ -207,12 +206,13 @@
     return e ? fsById(e.from) : null;
   }
 
-  // The first Footstep of the side path f is on.
+  // The first Footstep of the side path (or sub-path) f is on.
   function pathStart(f) {
     let cur = f;
     const seen = new Set();
     while (cur && !seen.has(cur.id)) {
       seen.add(cur.id);
+      if (cur.subStart) return cur;
       const up = branchRoot(cur);
       if (!up || up.thread !== 'branch') return cur;
       cur = up;
@@ -560,8 +560,9 @@
 
   const deg = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x).toFixed(0)}°`;
 
-  // Turns each Footstep's flags into notes. Main thread: direction (wandering /
-  // off course) and size (Jump / Crawl). Side paths: drifting and terminancy.
+  // Turns each Footstep's flags into notes: a branch suggestion when the intent vector
+  // reaches the stage limit (main story or side path), Jump / Crawl on the main story,
+  // and one terminancy note at the end of a side path that has opened too wide.
   function syncNotes(ids) {
     const tf = tfValue();
     journey.footsteps
@@ -582,53 +583,69 @@
             text: `${f.id} says much the same as ${m.repeat.id}. Delete it, or keep both?`,
             maths: `${Math.round(m.repeat.similarity * 100)}% alike`,
           });
+        // A lot in a strange direction (the intent vector reaches the stage limit): branch it.
+        if (m.branchHint && !(f.thread === 'branch' && (f.subStart || pathStart(f).ended)))
+          addNote({
+            kind: 'branch',
+            fsId: f.id,
+            text:
+              f.thread === 'main'
+                ? `${f.id} turns ${deg(m.direction)} from where your story is heading${m.sizeFlag === 'jump' ? ', and a lot happens in it' : ''}. That is too far for this stage (limit ${m.limit.toFixed(0)}°). Branch it into a side path?`
+                : `${f.id} turns ${deg(m.pathDirection ?? 0)} from where its own side path is heading. Start a sub-path from it?`,
+            maths: `intent ${m.iv.length.toFixed(2)} · direction ${deg(f.thread === 'main' ? m.direction : m.pathDirection ?? 0)} · limit ${m.limit.toFixed(0)}°`,
+          });
         if (f.thread === 'main') {
-          if (m.dirStatus === 'off')
-            addNote({
-              kind: 'off',
-              fsId: f.id,
-              text: `${f.id} turns ${deg(m.direction)} from where your story is heading. That is past the ${m.limit.toFixed(0)}° limit, so it is off course. Branch it into a side path?`,
-              maths: `direction ${deg(m.direction)} · limit ${m.limit.toFixed(0)}°`,
-            });
-          else if (m.dirStatus === 'wander')
-            addNote({
-              kind: 'wander',
-              fsId: f.id,
-              text: `${f.id} wanders slightly (${deg(m.direction)}). It would be off course past ${m.limit.toFixed(0)}°.`,
-              maths: `direction ${deg(m.direction)} · limit ${m.limit.toFixed(0)}°`,
-            });
           if (m.sizeFlag === 'jump')
             addNote({
               kind: 'jump',
               fsId: f.id,
-              text: `${f.id} is a Jump: a lot happens at once (${m.magnitude} against a usual ${m.avgMagnitude.toFixed(0)}). Split it, or keep it as one big step?`,
-              maths: `magnitude ${m.magnitude} · usual ${m.avgMagnitude.toFixed(0)}`,
+              text: `${f.id} is a Jump: a lot happens at once (${m.magnitude} against a usual ${m.usual.toFixed(0)}). Split it, or keep it as one big step?`,
+              maths: `magnitude ${m.magnitude} · usual ${m.usual.toFixed(0)}`,
             });
           if (m.sizeFlag === 'crawl')
             addNote({
               kind: 'crawl',
               fsId: f.id,
-              text: `${f.id} is a Crawl: much less happens than usual (${m.magnitude} against ${m.avgMagnitude.toFixed(0)}). Add to it or fold it into a neighbour?`,
-              maths: `magnitude ${m.magnitude} · usual ${m.avgMagnitude.toFixed(0)}`,
-            });
-        } else if (f.thread === 'branch' && !pathStart(f).ended) {
-          const bf = m.iv.length;
-          if (m.branch === 'terminate')
-            addNote({
-              kind: 'terminate',
-              fsId: f.id,
-              text: `The side path at ${f.id} has wandered so far it will be hard to bring back. Let it end here, or change its steps to lean back toward the main story.`,
-              maths: `branching factor ${bf.toFixed(2)} · terminancy ${tf.toFixed(2)}`,
-            });
-          else if (m.branch === 'drifting')
-            addNote({
-              kind: 'drifting',
-              fsId: f.id,
-              text: `The side path at ${f.id} is drifting further from where it branched.`,
-              maths: `branching factor ${bf.toFixed(2)} · terminancy ${tf.toFixed(2)}`,
+              text: `${f.id} is a Crawl: much less happens than usual (${m.magnitude} against ${m.usual.toFixed(0)}). Add to it or fold it into a neighbour?`,
+              maths: `magnitude ${m.magnitude} · usual ${m.usual.toFixed(0)}`,
             });
         }
       });
+    syncTerminancy();
+  }
+
+  // The last Footstep written on each side path (or sub-path), by its first Footstep's id.
+  function pathEnds() {
+    const ends = {};
+    journey.footsteps
+      .filter((f) => f.thread === 'branch')
+      .forEach((f) => {
+        const k = pathStart(f).id;
+        if (!ends[k] || f.created_at >= ends[k].created_at) ends[k] = f;
+      });
+    return ends;
+  }
+
+  // Terminancy is the side path's, so its one note sits on the path's last Footstep.
+  // Drifting has no note: the path just fades as its sector grows.
+  function syncTerminancy() {
+    const ends = pathEnds();
+    journey.alerts
+      .filter((a) => a.open && a.kind === 'terminate' && fsById(a.fsId))
+      .forEach((a) => {
+        const f = fsById(a.fsId);
+        if (f.thread !== 'branch' || ends[pathStart(f).id] !== f) a.open = false;
+      });
+    Object.values(ends).forEach((f) => {
+      const t = f.metrics?.terminancy;
+      if (!t || f.metrics.branch !== 'terminate' || pathStart(f).ended) return;
+      addNote({
+        kind: 'terminate',
+        fsId: f.id,
+        text: `The side path ending at ${f.id} has opened so wide from the main story that it will be hard to bring back. Let it end here, or change its steps to lean back toward the story.`,
+        maths: `sector ${t.area.toFixed(1)} · limit ${t.limit.toFixed(1)} · ${t.steps.toFixed(1)} steps`,
+      });
+    });
   }
 
   // Story drift: of the last six Footsteps written, if half or more are side
@@ -641,7 +658,7 @@
       .sort((a, b) => a.created_at - b.created_at)
       .slice(-DRIFT_WINDOW);
     const off = recent.filter((f) => f.thread === 'branch' || f.metrics?.dirStatus === 'off');
-    const wander = recent.filter((f) => f.thread === 'main' && f.metrics?.dirStatus === 'wander');
+    const wander = recent.filter((f) => f.thread === 'main' && ['wander', 'drifting'].includes(f.metrics?.dirStatus));
     return { recent, off, wander, drifting: recent.length >= 4 && off.length >= 3 && off.length / recent.length >= DRIFT_SHARE };
   }
 
@@ -742,7 +759,7 @@
     const footsteps = j.footsteps.map((f) => ({ ...f, pathStart: f.thread === 'branch' ? pathStart(f).id : null }));
     let out;
     try {
-      out = await NSMM.score({ key: j, footsteps, tf: Number.isFinite(j.tf) ? j.tf : null, plannedLength: j.plannedLength, branchShare: j.branchShare, stage: j.stage });
+      out = await NSMM.score({ key: j, footsteps, tf: Number.isFinite(j.tf) ? j.tf : null, plannedLength: j.plannedLength, stage: j.stage });
     } catch (e) {
       setStatus(e.message, 'warn');
       return false;
@@ -860,8 +877,12 @@
   // ---------- alert actions ----------
 
   // Move a main Footstep onto a side path that leaves the Footstep before it.
+  // On a side path, it starts a sub-path there instead.
   function makeBranch(fs) {
-    if (fs.thread === 'branch') return;
+    if (fs.thread === 'branch') {
+      fs.subStart = true;
+      return;
+    }
     const order = storyOrder();
     const i = order.indexOf(fs.id);
     const from = i > 0 ? order[i - 1] : order.find((id) => id !== fs.id);
@@ -875,6 +896,7 @@
     const root = branchRoot(fs);
     journey.edges = journey.edges.filter((e) => !(e.to === fs.id && e.type === 'temporal'));
     fs.thread = 'main';
+    delete fs.subStart;
     placeInOrder(fs.id, root && storyOrder().includes(root.id) ? root.id : 'END');
   }
 
@@ -914,7 +936,7 @@
       start.ended = fs.id;
       // The whole side path has ended: its other drift notes go too.
       journey.alerts
-        .filter((x) => x.open && ['drifting', 'terminate'].includes(x.kind) && fsById(x.fsId) && pathStart(fsById(x.fsId)) === start)
+        .filter((x) => x.open && ['drifting', 'terminate', 'branch'].includes(x.kind) && fsById(x.fsId) && pathStart(fsById(x.fsId)) === start)
         .forEach((x) => ((x.open = false), (x.resolution = 'end')));
     }
     if (action === 'dismiss') journey.driftDismissedAt = journey.footsteps.length;
@@ -1159,6 +1181,14 @@
     return pos;
   }
 
+  // Side paths fade with how far their sector has opened: 1 at the start, 0.4 at the limit.
+  function fade(f) {
+    const r = f.thread === 'branch' ? f.metrics?.terminancy?.ratio ?? 0 : 0;
+    return 1 - 0.6 * Math.min(1, r);
+  }
+
+  const DIR_WORDS = { on: 'on course', wander: 'wandering', drifting: 'drifting', off: 'off course' };
+
   // Fit the whole map with a margin, so labels at the edges are not cut off.
   function fitMap() {
     if (!network) return;
@@ -1228,9 +1258,9 @@
       const m = f.metrics || {};
       const heavy = m.sizeFlag === 'jump';
       const over = f.thread === 'main' ? m.dirStatus === 'off' : m.branch === 'terminate' && !pathStart(f).ended;
-      const wander = f.thread === 'main' && m.dirStatus === 'wander';
+      const wander = f.thread === 'main' && ['wander', 'drifting'].includes(m.dirStatus);
       const intensity = intensityOf(f);
-      const status = f.thread === 'main' ? { on: 'on course', wander: 'wandering slightly', off: 'off course' }[m.dirStatus] || '' : 'side path';
+      const status = f.thread === 'main' ? DIR_WORDS[m.dirStatus] || '' : f.subStart ? 'sub-path' : 'side path';
       return {
         id: f.id,
         x: pos[f.id].x,
@@ -1251,6 +1281,8 @@
         shadow: { enabled: over, color: LILAC, size: 16, x: 0, y: 0 },
         shapeProperties: { borderDashes: branch ? [6, 4] : heavy ? [3, 3] : false },
         font: labelFont(1),
+        // A side path fades as its sector against the main story grows.
+        opacity: fade(f),
       };
     });
     const ids = new Set(visible.map((f) => f.id));
@@ -1267,7 +1299,7 @@
           from: e.from,
           to: e.to,
           arrows: { to: { enabled: true, scaleFactor: 0.6 } },
-          color: { color: e.type === 'temporal' ? C.order : EDGE_TYPES[e.type]?.color || '#888', opacity: vecLine ? 0.9 : 0.85 },
+          color: { color: e.type === 'temporal' ? C.order : EDGE_TYPES[e.type]?.color || '#888', opacity: (vecLine ? 0.9 : 0.85) * fade(to) },
           dashes: vecLine ? to.thread === 'branch' : LINK_DASHES[e.type] || false,
           title: vecLine
             ? inspecting()
@@ -1426,6 +1458,7 @@
     const count = (fn) => main.filter((f) => f.metrics && fn(f.metrics)).length;
     const off = count((m) => m.dirStatus === 'off');
     const wander = count((m) => m.dirStatus === 'wander');
+    const drifting = count((m) => m.dirStatus === 'drifting');
     const jumps = count((m) => m.sizeFlag === 'jump');
     const crawls = count((m) => m.sizeFlag === 'crawl');
     const tf = tfValue();
@@ -1436,19 +1469,18 @@
       stat(branches.length, 'side paths') +
       stat(open, 'open notes', open ? 'warn' : '') +
       stat(off, 'off course', off ? 'warn' : '') +
-      stat(wander, 'wandering') +
+      stat(`${wander} / ${drifting}`, 'wandering / drifting') +
       stat(`${jumps} / ${crawls}`, 'jumps / crawls') +
       stat(st ? st.magnitude.toFixed(1) : '–', 'average magnitude') +
       stat(st ? st.intensity.toFixed(2) : '–', 'average intensity') +
-      stat(Number.isFinite(journey.engine?.limit) ? `${journey.engine.limit.toFixed(0)}°` : '–', `direction limit${journey.stage ? ' in ' + journey.stage : ''}`);
+      stat(Number.isFinite(journey.engine?.limit) ? `${journey.engine.limit.toFixed(0)}°` : '–', `direction limit${journey.stage ? ' in ' + journey.stage : ''}`) +
+      stat(`${journey.engine?.sideLimit?.steps ?? 3} at ${(journey.engine?.sideLimit?.degrees ?? tf * 180).toFixed(0)}°`, 'side-path limit (steps at angle)');
     $('#tf').value = tf;
     $('#tf-val').textContent = tf.toFixed(2);
     $('#tf-note').textContent = Number.isFinite(journey.tf)
       ? `Set by you. Automatic for ${journey.plannedLength} planned Footsteps would be ${(journey.engine?.autoTf ?? 0.35).toFixed(2)}.`
       : `Automatic from ${journey.plannedLength} planned Footsteps: longer stories are more lenient. Drag to override.`;
     if (Number.isFinite(journey.tf) && !$('#tf-auto')) $('#tf-note').insertAdjacentHTML('beforeend', ' <a href="#" id="tf-auto">Back to automatic</a>');
-    $('#branch-share').value = journey.branchShare;
-    $('#branch-share-val').textContent = Math.round(journey.branchShare * 100) + '%';
     const h = storyHealth();
     const hb = $('#health');
     hb.className = 'health ' + h.level;
@@ -1545,6 +1577,7 @@
 
   const NOTE_TITLES = {
     off: 'Off course',
+    branch: 'Branch it?',
     split: 'May be two Footsteps',
     repeat: 'Repeats an earlier Footstep',
     wander: 'Wandering slightly',
@@ -1563,7 +1596,9 @@
     const fs = fsById(a.fsId);
     switch (a.kind) {
       case 'off':
-        return fs?.thread === 'main' ? b('branch', 'Branch it') + b('accept', 'Keep on the main story') : b('accept', 'Clear');
+      case 'branch':
+        if (fs?.thread === 'main') return b('branch', 'Branch it') + b('accept', 'Keep on the main story');
+        return fs?.thread === 'branch' && !fs.subStart ? b('branch', 'Start a sub-path') + b('accept', 'Keep on this path') : b('accept', 'Clear');
       case 'jump':
       case 'split':
         return b('split', 'Split in two') + b('accept', 'Keep as one');
@@ -1611,13 +1646,13 @@
   function pullWords(f) {
     const m = f.metrics || {};
     if (f.thread === 'branch') {
-      const st = { ok: 'It stays close to where its side path began.', drifting: 'Its side path is drifting further away.', terminate: 'Its side path has gone so far it will be hard to bring back.' };
+      const st = { ok: 'Its side path stays close to the main story.', drifting: 'Its side path is opening wide from the main story, so it fades.', terminate: 'Its side path has opened so wide it will be hard to bring back.' };
       return st[m.branch] || 'A side path.';
     }
     if (!m.limit || f.thread !== 'main') return '';
     const size = m.sizeFlag === 'jump' ? 'A Jump: a lot happens at once' : m.sizeFlag === 'crawl' ? 'A Crawl: little happens' : 'A usual-sized step';
-    const dir = m.dirStatus === 'off' ? 'that goes off course' : m.dirStatus === 'wander' ? 'that wanders slightly' : 'on course';
-    return `${size}, ${dir}.`;
+    const dir = { on: 'on course', wander: 'that wanders a little', drifting: 'that is drifting', off: 'that goes off course' }[m.dirStatus] || 'on course';
+    return `${size}, ${dir}.${m.branchHint ? ' Kahyo suggests branching it.' : ''}`;
   }
 
   // The selected Footstep's packet, editable, shown in the drawer.
@@ -1706,27 +1741,31 @@
     if (!box) return;
     const row = (k, v, warn) => `<dt>${k}</dt><dd class="${warn ? 'warn' : ''}">${v}</dd>`;
     const judged = Number.isFinite(m.limit) && storyOrder().length >= 3;
-    const status = { on: 'on course', wander: 'wandering slightly', off: 'off course' }[m.dirStatus] || '–';
+    const status = DIR_WORDS[m.dirStatus] || '–';
     let html = `<div class="iv-wrap">${gauge(m.direction ?? 0, m.limit ?? 180)}<dl class="readout">
-      ${row('Magnitude', `${m.magnitude ?? 0} <small class="muted">usual ${(m.avgMagnitude ?? 0).toFixed(0)}</small>`, Boolean(m.sizeFlag))}
+      ${row('Magnitude', `${m.magnitude ?? 0} <small class="muted">usual ${(m.usual ?? m.avgMagnitude ?? 0).toFixed(0)}</small>`, Boolean(m.sizeFlag))}
       ${row('Size', m.sizeFlag === 'jump' ? 'Jump' : m.sizeFlag === 'crawl' ? 'Crawl' : 'usual', Boolean(m.sizeFlag))}
       ${row('Direction', judged ? deg(m.direction ?? 0) : 'from the 4th Footstep')}
       ${row('Limit', judged ? `${(m.limit ?? 0).toFixed(0)}°` : '–')}
-      ${f.thread === 'main' ? row('Status', status, m.dirStatus !== 'on') : ''}
+      ${row('Status', status, m.dirStatus !== 'on')}
     </dl></div>`;
-    if (f.thread === 'branch' && m.iv) {
-      const tf = tfValue();
+    if (m.iv) {
       const iv = m.iv;
-      html += `<div class="iv-title">Intent vector<small class="mword">aî + bĵ · from where this side path began</small></div>
+      html += `<div class="iv-title">Intent vector<small class="mword">direction + ½ magnitude · ${f.thread === 'branch' ? 'against its own path' : 'against the main story'}</small></div>
       <dl class="readout">
-        ${row('Vector', `${iv.magnitude.toFixed(2)}î ${iv.direction >= 0 ? '+' : '−'} ${Math.abs(iv.direction).toFixed(2)}ĵ`)}
-        ${row('Branching factor', iv.length.toFixed(2), m.branch !== 'ok')}
-        ${row('Drifting from', (journey.branchShare * tf).toFixed(2))}
-        ${row('Terminancy', tf.toFixed(2))}
-        ${row('State', { ok: 'close to its start', drifting: 'drifting', terminate: 'at its limit' }[m.branch] || '–', m.branch !== 'ok')}
+        ${row('Direction part', `${iv.direction.toFixed(2)} <small class="muted">of the limit</small>`)}
+        ${row('Magnitude part', `${iv.magnitude.toFixed(2)} <small class="muted">+1 Jump, −1 Crawl</small>`)}
+        ${row('Length', `${iv.length.toFixed(2)} <small class="muted">branch at 1</small>`, m.branchHint)}
       </dl>`;
-    } else {
-      html += `<p class="muted small">The intent vector shows on side-path Footsteps only. This one is on the main thread.</p>`;
+    }
+    if (f.thread === 'branch' && m.terminancy) {
+      const t = m.terminancy;
+      html += `<div class="iv-title">Terminancy<small class="mword">sector ½ · L² · Δθ against the main story</small></div>
+      <dl class="readout">
+        ${row('Travelled', `${t.steps.toFixed(1)} usual steps`)}
+        ${row('Sector', `${t.area.toFixed(2)} <small class="muted">limit ${t.limit.toFixed(2)}</small>`, m.branch !== 'ok')}
+        ${row('State', { ok: 'close to the story', drifting: 'opening wide (fading)', terminate: 'at its limit' }[m.branch] || '–', m.branch !== 'ok')}
+      </dl>`;
     }
     box.innerHTML = html;
     const words = $('.iv-words');
@@ -1734,7 +1773,7 @@
   }
 
   // Dial for the signed direction: 0° points right, + turns anticlockwise, − clockwise.
-  // The shaded wedge is the on-course zone (±X/2), the lines mark the off-course limit (±X).
+  // The green wedge is on course (±X/3), amber is wandering then drifting, the lines mark the off-course limit (±X).
   function gauge(direction, limit) {
     const R = 44;
     const cx = 60;
@@ -1746,7 +1785,7 @@
       return `M${cx} ${cy}L${x1.toFixed(1)} ${y1.toFixed(1)}A${r} ${r} 0 ${Math.abs(b - a) > 180 ? 1 : 0} 0 ${x2.toFixed(1)} ${y2.toFixed(1)}Z`;
     };
     const lim = Math.min(180, limit);
-    const half = lim / 2;
+    const half = lim / 3;
     const d = clamp(direction, -180, 180);
     const color = Math.abs(d) > lim ? 'var(--red)' : Math.abs(d) > half ? 'var(--amber)' : 'var(--green)';
     const [lx1, ly1] = pt(lim);
@@ -2142,11 +2181,6 @@
       factorChanged();
     });
     $('#tf').addEventListener('change', factorSettled);
-    $('#branch-share').addEventListener('input', (e) => {
-      journey.branchShare = Number(e.target.value);
-      factorChanged();
-    });
-    $('#branch-share').addEventListener('change', factorSettled);
     $('#panel-storyline').addEventListener('click', (e) => {
       if (e.target.id !== 'tf-auto') return;
       e.preventDefault();
@@ -2480,7 +2514,7 @@
       Object.values(EDGE_TYPES)
         .map((t, i) => `<span><i class="line ${Object.keys(EDGE_TYPES)[i]}" style="--c:${t.color}"></i>${t.label}</span>`)
         .join('') +
-      '<span><i class="ring over"></i>Off course</span><span><i class="ring wander"></i>Wandering</span><span><i class="ring branch"></i>Side path</span><span><i class="ring heavy"></i>Jump</span><span><i class="ring broken"></i>Trait break</span>';
+      '<span><i class="ring over"></i>Off course</span><span><i class="ring wander"></i>Wandering or drifting</span><span><i class="ring branch"></i>Side path (fades as it opens wide)</span><span><i class="ring heavy"></i>Jump</span><span><i class="ring broken"></i>Trait break</span>';
     if (!SR) $('#mic-note').textContent = 'Voice needs Chrome or Edge. Typing works everywhere.';
     let mode = 'write';
     try {

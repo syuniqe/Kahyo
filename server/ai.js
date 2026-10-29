@@ -1,12 +1,15 @@
 // Relays one task to the writer's own AI provider with their key. The key comes
 // in a request header, is used for this call only and is never stored or logged.
-// Gemini (native) or any OpenAI-compatible chat API (Groq, OpenAI, OpenRouter, custom).
+// Gemini (native), Claude (Anthropic SDK) or any OpenAI-compatible chat API (Groq, OpenAI, OpenRouter, custom).
+
+import Anthropic from '@anthropic-ai/sdk';
 
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/models/';
 export const DEFAULT_MODEL = 'gemini-3.8-flash';
 
 export const PROVIDERS = {
   gemini: { label: 'Gemini', base: GEMINI, model: DEFAULT_MODEL },
+  claude: { label: 'Claude', base: '', model: 'claude-opus-5-5' },
   groq: { label: 'Groq', base: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
   openai: { label: 'OpenAI', base: 'https://api.openai.com/v1', model: 'gpt-4.1-mini' },
   openrouter: { label: 'OpenRouter', base: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-3.3-70b-instruct' },
@@ -110,6 +113,37 @@ async function geminiRun(cfg, body) {
   }
 }
 
+// ---------- Claude ----------
+
+// Kahyo's tasks are short extractions, so effort is low. If Claude declines a request,
+// the server-side fallback answers it on another model.
+async function claudeRun(cfg, prompt) {
+  const client = new Anthropic({ apiKey: cfg.key, maxRetries: 2 });
+  const model = cfg.model || PROVIDERS.claude.model;
+  let msg;
+  try {
+    msg = await client.beta.messages.create({
+      model,
+      max_tokens: 16000,
+      output_config: { effort: 'low' },
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+      messages: [{ role: 'user', content: prompt }],
+    });
+  } catch (e) {
+    if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) {
+      throw Object.assign(new Error(`Claude refused the key. Check it in Settings. (${e.message})`), { status: e.status });
+    }
+    if (e instanceof Anthropic.RateLimitError) throw Object.assign(new Error(`Rate limit reached. Wait a minute and try again. (${e.message})`), { status: 429 });
+    if (e instanceof Anthropic.NotFoundError) throw Object.assign(new Error(`Claude has no model called ${model}. Pick another in Settings. (${e.message})`), { status: 404 });
+    if (e instanceof Anthropic.InternalServerError) throw Object.assign(new Error(`Claude is busy right now. Wait a minute and press Add again. (${e.message})`), { status: e.status });
+    if (e instanceof Anthropic.APIError) throw Object.assign(new Error(e.message), { status: e.status || 502 });
+    throw e;
+  }
+  if (msg.stop_reason === 'refusal') throw Object.assign(new Error('Claude declined this one. Try rewording the Footstep.'), { status: 422 });
+  return { text: msg.content.filter((b) => b.type === 'text').map((b) => b.text).join('') };
+}
+
 // ---------- OpenAI-compatible ----------
 
 async function chatModel(cfg) {
@@ -168,6 +202,8 @@ export async function runTask(cfg, task) {
           : { temperature: task.temperature ?? 0.3, thinkingConfig: { thinkingLevel: 'low' } },
       }
     );
+  } else if (provider === 'claude') {
+    out = await claudeRun(cfg, prompt);
   } else {
     const base = (provider === 'custom' ? cfg.baseUrl || '' : PROVIDERS[provider].base).replace(/\/+$/, '');
     if (!/^https:\/\//.test(base)) throw Object.assign(new Error('Set an https base URL for the custom provider in Settings.'), { status: 400 });

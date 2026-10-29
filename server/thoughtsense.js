@@ -107,9 +107,16 @@ function magnitude(fs) {
 
 // Intensity (0–1) is the impact of what happens; it sets the circle size.
 // The AI judges it; offline it follows how much the Footstep holds.
+// Intensity (0–1) is how big the event is, not how much happens (that is magnitude).
+// The AI or the writer judges it; offline it is read from the weight of the words.
+const HEAVY_WORDS = new Set(
+  'die dies died dead death kill kills killed murder war battle betray betrays betrayed reveal reveals revealed secret confess confesses arrest arrested escape escapes fire burn burns flood floods storm attack attacks crown crowned marry married love loves lost lose loses fall falls fell born birth exile exiled refuse refuses defy defies rebel rebellion strike collapse destroy destroyed save saves rescue rescued free freed'.split(' ')
+);
 function intensity(fs) {
   if (Number.isFinite(fs.intensity)) return clamp(fs.intensity, 0, 1);
-  return clamp(dataAmount(fs) / SPLIT_AT, 0, 1);
+  const words = String(fs.event || '').toLowerCase().match(/[a-z]+/g) || [];
+  const heavy = new Set(words.filter((w) => HEAVY_WORDS.has(w))).size;
+  return round2(clamp(0.3 + 0.15 * heavy, 0.1, 0.9));
 }
 
 // ---------- the thread ----------
@@ -253,6 +260,41 @@ function branchState(factor, tf, share = DEFAULT_BRANCH_SHARE) {
   if (factor >= tf) return 'terminate';
   if (factor >= share * tf) return 'drifting';
   return 'ok';
+}
+
+// ---------- direction statuses, intent vector, terminancy (v3) ----------
+
+// Direction alone gives the status, against the stage limit X:
+// on course up to X/3, wandering up to 2X/3, drifting up to X, off course past X.
+function directionStatus(degrees, limit, judged) {
+  if (!judged) return 'on';
+  const r = Math.abs(degrees) / limit;
+  return r > 1 ? 'off' : r > 2 / 3 ? 'drifting' : r > 1 / 3 ? 'wander' : 'on';
+}
+
+// Intent vector of any Footstep, against its own thread: direction and magnitude together.
+//   b = θ / X               (1 = at the stage limit, so later stages are stricter)
+//   a = clamp(log2(m / usual), −1, 1)   (+1 = a Jump, double the usual; −1 = a Crawl)
+//   length = √(b² + (a/2)²)   (magnitude weighs half as much as direction)
+// A lot in the same direction is a Jump (length ≤ ½); a lot in a strange direction is
+// a branch: Kahyo suggests one when the length reaches 1.
+const MAGNITUDE_WEIGHT = 0.5;
+function intentOf(degrees, limit, m, usual) {
+  const b = degrees / limit;
+  const a = usual > 0 && m > 0 ? clamp(Math.log2(m / usual), -1, 1) : 0;
+  return { direction: round2(b), magnitude: round2(a), length: round2(Math.sqrt(b * b + (MAGNITUDE_WEIGHT * a) ** 2)) };
+}
+
+// Terminancy of a side path: the sector it opens against the main story.
+//   L = how far the path has travelled, in usual steps (its magnitudes / the usual magnitude)
+//   Δθ = the angle between the path's latest heading and the main story's, in radians
+//   area = ½ · L² · Δθ     limit = ½ · 3² · (TF · π)  (three usual steps opened at TF × 180°)
+// Turning back toward the story shrinks Δθ and the area. A long path is fine if it stays close.
+const TERMINANCY_STEPS = 3;
+function sectorOf(steps, degrees, tf) {
+  const area = 0.5 * steps * steps * (Math.abs(degrees) * Math.PI) / 180;
+  const limit = 0.5 * TERMINANCY_STEPS * TERMINANCY_STEPS * tf * Math.PI;
+  return { steps: round2(steps), area: round2(area), limit: round2(limit), ratio: round2(area / limit) };
 }
 
 // Averages for the Storyline stats.
@@ -507,96 +549,112 @@ function sideOf(st, dots) {
 }
 
 // Scores every Footstep in writing order, each against the main thread as it
-// stood before it. A side-path Footstep's intent vector is measured from the
-// direction its path started at (pathStart: the id of its path's first Footstep).
-// footsteps: [{ id, thread, stage, pathStart, event, context, subjects, promises, environment, intensity, embedding }]
+// stood before it, and side-path Footsteps also against their own path.
+// pathStart: the id of the first Footstep of the Footstep's side path (or sub-path).
+// footsteps: [{ id, thread, stage, pathStart, event, context, subjects, promises, environment, intensity, embedding | e64 }]
 function scoreJourney(input = {}) {
   const footsteps = Array.isArray(input.footsteps) ? input.footsteps : [];
   const plannedLength = clamp(Math.round(num(input.plannedLength, DEFAULT_PLANNED_LENGTH)), 1, 1000);
-  const branchShare = clamp(num(input.branchShare, DEFAULT_BRANCH_SHARE), 0.05, 1);
   const autoTf = autoTerminancy(plannedLength);
   const tf = input.tf === null || input.tf === undefined ? autoTf : clamp(num(input.tf, autoTf), 0.1, 1);
   const states = {};
+  const paths = {};
   const mainSizes = [];
   const seen = [];
   const metrics = {};
   let lastDim = null;
-  // Footsteps before `from` were scored before and have not changed: they only build the
-  // thread, and their earlier results (`known`: direction and magnitude) seed side paths.
+  // Footsteps before `from` were scored before and have not changed: they rebuild the
+  // threads, and their earlier results (`known`) stand; only what the factors decide is redone.
   const startAt = clamp(Math.round(num(input.from, 0)), 0, footsteps.length);
+
+  const grow = (store, key, e, dots) => {
+    if (!store[key]) store[key] = threadState();
+    const st = store[key];
+    addToThread(st, e, dots || st.X.map((x) => dotF(x, e)));
+    return st;
+  };
+  const against = (st, e, judgedSize) => {
+    const n = st ? st.X.length : 0;
+    const dots = e && n ? st.X.map((x) => dotF(x, e)) : [];
+    const judged = judgedSize >= MIN_TO_JUDGE && (st ? st.kept.length : 0) >= MIN_TO_JUDGE && Boolean(e) && n > 0;
+    return { dots, judged, dev: judged ? deviationFrom(st, e, dots) : { degrees: 0, stray: 0, z: 0 } };
+  };
+
   footsteps.forEach((raw, index) => {
     const f = { ...raw, subjects: list(raw.subjects), promises: list(raw.promises), environment: list(raw.environment), event: String(raw.event || '') };
     const e = cleanVector(decodeVector(raw));
-    if (index < startAt) {
-      // Their direction and size stand; the factors may have moved, so their status is redone.
-      const k = raw.known || {};
-      const direction = num(k.direction, 0);
-      const m0 = num(k.magnitude, magnitude(f));
-      const limit = directionLimit(tf, f.stage);
-      const abs = Math.abs(direction);
-      const back = f.thread === 'branch' && f.pathStart && f.pathStart !== f.id ? metrics[f.pathStart] : null;
-      const part = {
-        direction,
-        magnitude: m0,
-        limit,
-        dirStatus: !k.judged ? 'on' : abs > limit ? 'off' : abs > limit / 2 ? 'wander' : 'on',
-        iv: intentVector(m0, direction - (back?.direction ?? direction), back?.magnitude ?? m0),
-      };
-      if (f.thread === 'branch') part.branch = branchState(part.iv.length, tf, branchShare);
-      metrics[f.id] = part;
-      if (f.thread === 'main') {
-        mainSizes.push(magnitude(f));
-        if (e) {
-          if (!states[e.length]) states[e.length] = threadState();
-          const s0 = states[e.length];
-          addToThread(s0, e, s0.X.map((x) => dotF(x, e)));
-          s0.prevA = null;
-          lastDim = e.length;
-        }
-      }
-      if (f.thread !== 'archived') seen.push({ id: f.id, event: f.event, words: new Set(contentWords(f.event)), embedding: e });
-      return;
-    }
-    const dim = e ? e.length : lastDim;
-    const st = dim && states[dim];
-    const n = st ? st.X.length : 0;
-    const dots = e && st ? st.X.map((x) => dotF(x, e)) : [];
-    const m = magnitude(f);
-    const avgMagnitude = median(mainSizes);
-    const judged = mainSizes.length >= MIN_TO_JUDGE && (st ? st.kept.length : 0) >= MIN_TO_JUDGE;
-    const dev = judged && e && n ? deviationFrom(st, e, dots) : { degrees: 0, stray: 0, z: 0 };
+    const skipped = index < startAt;
+    const k = raw.known || {};
     const limit = directionLimit(tf, f.stage);
-    const abs = Math.abs(dev.degrees);
-    let sizeFlag = null;
-    if (judged && avgMagnitude > 0) {
-      if (m > JUMP * avgMagnitude) sizeFlag = 'jump';
-      else if (m < CRAWL * avgMagnitude) sizeFlag = 'crawl';
+    const m = skipped ? num(k.magnitude, magnitude(f)) : magnitude(f);
+    const usual = skipped ? num(k.usual, median(mainSizes)) : median(mainSizes);
+    const side = f.thread === 'branch';
+    const pathKey = side ? f.pathStart || f.id : null;
+    const path = side ? (paths[pathKey] = paths[pathKey] || { steps: 0, own: {}, size: 0 }) : null;
+
+    // Against the main story.
+    const dim = e ? e.length : lastDim;
+    const main = dim && states[dim];
+    let direction;
+    let judged;
+    let dev = { degrees: 0, stray: 0, z: 0 };
+    let dots = [];
+    if (skipped) {
+      direction = num(k.direction, 0);
+      judged = Boolean(k.judged);
+    } else {
+      const r = against(main, e, mainSizes.length);
+      ({ dots, judged, dev } = r);
+      direction = dev.degrees;
     }
-    const from = f.thread === 'branch' && f.pathStart && f.pathStart !== f.id ? metrics[f.pathStart] : null;
+
+    // A side-path Footstep is also judged against its own path, for sub-paths.
+    let own = null;
+    if (side) {
+      if (skipped) own = Number.isFinite(k.pathDirection) ? { degrees: k.pathDirection, judged: true } : null;
+      else if (e && path.own[e.length]) {
+        const r = against(path.own[e.length], e, path.size);
+        if (r.judged) own = { degrees: r.dev.degrees, judged: true };
+      }
+    }
+
+    const sizeFlag = judged && usual > 0 ? (m > JUMP * usual ? 'jump' : m < CRAWL * usual ? 'crawl' : null) : null;
+    const iv = intentOf(own ? own.degrees : direction, limit, m, usual);
     const out = {
       magnitude: m,
+      usual,
       intensity: intensity(f),
-      direction: dev.degrees,
-      angle: (dev.degrees + 360) % 360,
-      stray: dev.stray,
-      spread: dev.z,
-      avgMagnitude,
+      direction,
+      angle: (direction + 360) % 360,
       limit,
-      dirStatus: !judged ? 'on' : abs > limit ? 'off' : abs > limit / 2 ? 'wander' : 'on',
       judged,
+      dirStatus: directionStatus(direction, limit, judged),
       sizeFlag,
-      iv: intentVector(m, dev.degrees - (from?.direction ?? dev.degrees), from?.magnitude ?? m),
+      iv,
+      // Branch it: a lot in a strange direction, on the main story or on a side path.
+      branchHint: (side ? Boolean(own) : judged) && iv.length >= 1,
     };
-    if (f.thread === 'branch') out.branch = branchState(out.iv.length, tf, branchShare);
+    if (!skipped) {
+      out.stray = dev.stray;
+      out.spread = dev.z;
+      out.avgMagnitude = usual;
+    }
+    if (own) out.pathDirection = own.degrees;
+    if (side) {
+      path.steps += usual > 0 ? m / usual : 1;
+      out.terminancy = sectorOf(path.steps, direction, tf);
+      out.branch = out.terminancy.ratio >= 1 ? 'terminate' : out.terminancy.ratio >= 0.5 ? 'drifting' : 'ok';
+      path.size++;
+      if (e) grow(path.own, e.length, e);
+    }
     const words = new Set(contentWords(f.event));
-    out.repeat = f.thread === 'archived' ? null : repeatOf({ event: f.event, words, embedding: e }, seen);
+    if (!skipped) out.repeat = f.thread === 'archived' ? null : repeatOf({ event: f.event, words, embedding: e }, seen);
     metrics[f.id] = out;
     if (f.thread === 'main') {
       mainSizes.push(m);
       if (e) {
-        if (!states[e.length]) states[e.length] = threadState();
-        const s2 = states[e.length];
-        addToThread(s2, e, s2 === st ? dots : s2.X.map((x) => dotF(x, e)));
+        const st = grow(states, e.length, e, main && main.X.length && main === states[e.length] && dots.length === main.X.length ? dots : null);
+        if (skipped) st.prevA = null;
         lastDim = e.length;
       }
     }
@@ -604,7 +662,13 @@ function scoreJourney(input = {}) {
   });
   return {
     metrics,
-    info: { tf, autoTf, limit: directionLimit(tf, input.stage), stageAfter: stageLabelAfter(plannedLength) },
+    info: {
+      tf,
+      autoTf,
+      limit: directionLimit(tf, input.stage),
+      stageAfter: stageLabelAfter(plannedLength),
+      sideLimit: { steps: TERMINANCY_STEPS, degrees: round2(tf * 180) },
+    },
   };
 }
 
@@ -643,6 +707,9 @@ export {
   cosine,
   localEmbedding,
   repeatOf,
+  directionStatus,
+  intentOf,
+  sectorOf,
   scoreJourney,
   stagesFor,
 };

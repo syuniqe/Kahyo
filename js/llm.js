@@ -13,6 +13,7 @@
 
   const PROVIDERS = {
     gemini: { label: 'Gemini', base: GEMINI, model: DEFAULT_MODEL, keyHint: 'AIza…', keyUrl: 'https://aistudio.google.com/apikey' },
+    claude: { label: 'Claude', base: '', model: 'claude-opus-5-5', keyHint: 'sk-ant-…', keyUrl: 'https://platform.claude.com/settings/keys' },
     groq: { label: 'Groq', base: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', keyHint: 'gsk_…', keyUrl: 'https://console.groq.com/keys' },
     openai: { label: 'OpenAI', base: 'https://api.openai.com/v1', model: 'gpt-4.1-mini', keyHint: 'sk-…', keyUrl: 'https://platform.openai.com/api-keys' },
     openrouter: { label: 'OpenRouter', base: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-3.3-70b-instruct', keyHint: 'sk-or-…', keyUrl: 'https://openrouter.ai/keys' },

@@ -121,13 +121,33 @@ test('a Footstep that says the same again is flagged as a repeat', () => {
   assert.strictEqual(out.info.stageAfter, 12);
 });
 
-test('scoreJourney measures a side path from its first Footstep', () => {
+test('a side path opens a sector against the main story that grows as it travels', () => {
   const main = steady(12).map((f, i) => ({ ...f, id: 'M' + i, thread: 'main', event: 'word' + i + ' story beat number ' + i }));
   const s1 = { ...fs(vec()), id: 'B1', thread: 'branch', pathStart: 'B1', event: 'alpha beta gamma delta' };
   const s2 = { ...fs(vec()), id: 'B2', thread: 'branch', pathStart: 'B1', event: 'epsilon zeta eta theta' };
   const out = N.scoreJourney({ footsteps: [...main, s1, s2] });
-  assert.ok(out.metrics.B1.iv.length < 0.1);
+  const t1 = out.metrics.B1.terminancy;
+  const t2 = out.metrics.B2.terminancy;
+  assert.ok(t2.steps > t1.steps);
+  assert.strictEqual(t1.limit, t2.limit);
   assert.ok(['ok', 'drifting', 'terminate'].includes(out.metrics.B2.branch));
+  assert.strictEqual(out.metrics.M5.terminancy, undefined);
+});
+
+test('the sector shrinks when a side path turns back toward the story', () => {
+  const far = N.sectorOf(3, 60, 0.3);
+  const back = N.sectorOf(3, 10, 0.3);
+  assert.ok(back.area < far.area);
+  assert.ok(Math.abs(N.sectorOf(3, 54, 0.3).ratio - 1) < 0.01);
+});
+
+test('a Jump in the same direction is not a branch; a strange direction is', () => {
+  assert.ok(N.intentOf(0, 30, 4, 1).length <= 0.5);
+  assert.ok(N.intentOf(32, 30, 1, 1).length >= 1);
+  assert.strictEqual(N.directionStatus(5, 30, true), 'on');
+  assert.strictEqual(N.directionStatus(15, 30, true), 'wander');
+  assert.strictEqual(N.directionStatus(25, 30, true), 'drifting');
+  assert.strictEqual(N.directionStatus(40, 30, true), 'off');
 });
 
 test('scoring only the changed tail gives the same results as scoring everything', () => {

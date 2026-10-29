@@ -8,7 +8,7 @@ This is a working demo of the **Wordwalk Model**, a Narrative Storyline Mapping 
 | --- | --- |
 | Hosting | GitHub Pages (static site, no server) |
 | Voice to text | Browser speech recognition (Chrome / Edge; English India, US, UK, Hindi) |
-| AI extraction, continuity checks, prose | Any AI key (Gemini or Groq free tiers, OpenAI, OpenRouter), stored only in your browser |
+| AI extraction, continuity checks, prose | Any AI key (Gemini or Groq free tiers, Claude, OpenAI, OpenRouter), stored only in your browser |
 | Embeddings | Gemini `gemini-embedding-001` free tier, or an offline fallback (text model defaults to `gemini-3.8-flash` and switches to the newest Flash automatically if Google retires it) |
 | Storage | Your browser (localStorage), plus JSON export / import |
 
@@ -40,7 +40,7 @@ The ThoughtSense Engine is Kahyo's IP. Its formulas live only in `js/nsmm.js` an
 index.html          page layout
 css/style.css       styles
 js/nsmm.js          ThoughtSense Engine (also runs in Node for tests)
-js/llm.js           AI client (Gemini and OpenAI-compatible providers)
+js/llm.js           AI client (Gemini, Claude and OpenAI-compatible providers, relayed by the server)
 js/app.js           app logic, graph, speech, UI
 js/sample.js        the sample Journey
 vendor/             vis-network graph library (MIT)
@@ -55,7 +55,8 @@ Your Journey and API key stay in your browser. When a key is set, transcripts ar
 
 - **Home** lists every Journey saved in this browser (no sign-in yet).
 - **Write**: speak, the story map (a click only highlights a Footstep), a story-health pill, and the right pane with **Notes** (they stay until you clear them) and **Draft**. The pane folds away with ».
-- **Inspect**: the right pane becomes **Footstep** (the selected Footstep, its values and notes) and **Storyline** (terminancy factor, branching share, planned length, stats).
+- **Inspect**: the right pane becomes **Footstep** (the selected Footstep, its values and notes) and **Storyline** (terminancy factor, planned length, stats and the side-path limit).
 - **Graph**: on course climbs at 35°; each Footstep's line turns from that by its direction, its length is the magnitude, its circle size the intensity. Side paths are dashed.
-- **AI**: any provider (Gemini, Groq, OpenAI, OpenRouter or another OpenAI-compatible API). Embeddings come from Gemini, or offline ones.
+- **AI**: any provider (Gemini, Claude, Groq, OpenAI, OpenRouter or another OpenAI-compatible API). Claude runs through the official Anthropic SDK on the server. Claude has no embeddings, so embeddings come from Gemini (an optional second key), or offline ones.
+- **Model**: direction alone gives each Footstep's status (on course, wandering, drifting, off course) against the stage limit. The intent vector (direction plus half-weighted magnitude) suggests branching, on the main story or on a side path (a sub-path). Terminancy belongs to side paths only: the sector they open against the main story (½·L²·Δθ) against a limit of three usual steps at TF×180°. Side paths fade as the sector grows, and one note sits at the path's last Footstep.
 - While Kahyo works, the logo scribbles itself in the map's bottom-right corner.

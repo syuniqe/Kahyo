@@ -1,0 +1,7 @@
+{
+  "name": "kahyo",
+  "private": true,
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.3.0"
+  }
+}

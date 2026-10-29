@@ -9,7 +9,6 @@
   const stageName = (s) => STAGE_ALIASES[s] || s;
 
   const DEFAULT_PLANNED_LENGTH = 60;
-  const DEFAULT_BRANCH_SHARE = 0.45;
 
   // Keeps stage labels in story order: a stage never goes back to an earlier one.
   function monotonicStages(labels) {
@@ -94,27 +93,27 @@
   // Only Footsteps from the first one that changed since the last score are re-scored;
   // the ones before it just rebuild the thread on the server.
   const lastSent = new WeakMap();
-  // j: { footsteps: [...with pathStart], tf, plannedLength, branchShare, stage } → { metrics: {id: …}, info }
+  const pick = (m) => ({ direction: m.direction, magnitude: m.magnitude, judged: m.judged, usual: m.usual, pathDirection: m.pathDirection });
+  // j: { footsteps: [...with pathStart], tf, plannedLength, stage } → { metrics: {id: …}, info }
   async function score(j, { full = false } = {}) {
     const items = j.footsteps.map(wire);
     // A stage change only moves the limit, which the server redoes anyway, so it is left out.
     const sig = items.map(({ stage, ...x }) => JSON.stringify(x));
     const key = j.key || j;
     const prev = lastSent.get(key);
-    // The factors (TF, planned length, branching share) only change statuses, which the
+    // The factors (TF, planned length) only change statuses, which the
     // server redoes for every Footstep, so they never force a full re-score.
     let from = 0;
     if (!full && prev) {
-      while (from < sig.length && from < prev.sig.length && sig[from] === prev.sig[from] && j.footsteps[from].metrics && 'judged' in j.footsteps[from].metrics) from++;
+      while (from < sig.length && from < prev.sig.length && sig[from] === prev.sig[from] && j.footsteps[from].metrics && 'usual' in j.footsteps[from].metrics) from++;
     }
     const out = await call({
       op: 'score',
       tf: j.tf,
       plannedLength: j.plannedLength,
-      branchShare: j.branchShare,
       stage: j.stage,
       from,
-      footsteps: items.map((x, i) => (i < from ? { ...x, known: { direction: j.footsteps[i].metrics.direction, magnitude: j.footsteps[i].metrics.magnitude, judged: j.footsteps[i].metrics.judged } } : x)),
+      footsteps: items.map((x, i) => (i < from ? { ...x, known: pick(j.footsteps[i].metrics) } : x)),
     });
     lastSent.set(key, { sig });
     return out;
@@ -125,5 +124,5 @@
     return call({ op: 'stages', count, plannedLength });
   }
 
-  root.NSMM = { STAGES, stageName, DEFAULT_PLANNED_LENGTH, DEFAULT_BRANCH_SHARE, monotonicStages, localEmbedding, score, stages };
+  root.NSMM = { STAGES, stageName, DEFAULT_PLANNED_LENGTH, monotonicStages, localEmbedding, score, stages };
 })(window);

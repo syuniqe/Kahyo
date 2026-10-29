@@ -1,6 +1,6 @@
 // A pre-extracted sample Journey so the demo works with no key and no mic.
 // Loading it runs the same embedding + ThoughtSense scoring as live input.
-// It shows every feature: a side path (sidePath / after), a Footstep holding three events,
+// It shows every feature: a side path (sidePath / after) that opens too wide and reaches terminancy, a Footstep holding three events,
 // a Crawl, a Jump, a repeat, a trait break, an alias, and every kind of link.
 
 window.KAHYO_SAMPLE = {
@@ -433,6 +433,26 @@ window.KAHYO_SAMPLE = {
           environment: ['The shore below the salt pans'],
           seeds: [],
           event: 'The march arrives at the village and thousands gather on the shore',
+        },
+      ],
+    },
+    {
+      transcript: 'And Prince Arjun builds a fleet of glass ships, sails beyond the edge of the map and founds a floating empire among the stars.',
+      after: 'FS#017',
+      footsteps: [
+        {
+          subjects: ['Arjun'],
+          context: 'Years later, far from India',
+          intensity: 0.7,
+          promises: [],
+          environment: ['A floating empire among the stars', 'Glass ships'],
+          seeds: [
+            {
+              target: 'FS#017',
+              type: 'cause',
+            },
+          ],
+          event: 'Prince Arjun builds a fleet of glass ships, sails beyond the edge of the map and founds a floating empire among the stars',
         },
       ],
     },
