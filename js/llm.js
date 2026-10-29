@@ -64,13 +64,33 @@
     return status === 404 || /no longer available|not found|is not supported|deprecated|decommissioned|does not exist/i.test(msg);
   }
 
+  // A busy model (503, "high demand", overloaded) usually clears in seconds.
+  function isBusy(status, msg) {
+    return status === 503 || status === 529 || /high demand|overloaded|unavailable|try again later/i.test(msg || '');
+  }
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // Retry a busy call twice (after about 2 s and 5 s), then let the caller try another model.
+  async function patient(call) {
+    for (let i = 0; ; i++) {
+      try {
+        return await call();
+      } catch (e) {
+        if (!isBusy(e.status, e.message) || i >= 2) throw e;
+        if (root.LLM?.onBusy) root.LLM.onBusy(i + 1);
+        await wait(i ? 5000 : 2000);
+      }
+    }
+  }
+
   async function failure(res, model) {
     let msg = `${res.status} ${res.statusText}`;
     try {
       const err = await res.json();
       msg = err.error?.message || err.message || msg;
     } catch {}
-    if (res.status === 429) msg = 'Rate limit reached. Wait a minute and try again. (' + msg + ')';
+    if (isBusy(res.status, msg)) msg = `${model} is busy right now (high demand). Kahyo tried again and tried another model; wait a minute and press Add again. (${msg})`;
+    else if (res.status === 429) msg = 'Rate limit reached. Wait a minute and try again. (' + msg + ')';
     if (res.status === 401 || res.status === 403) msg = `${providerLabel()} refused the key. Check it in Settings. (${msg})`;
     const err = new Error(msg);
     err.status = res.status;
@@ -108,15 +128,41 @@
     return res.json();
   }
 
+  // Other Flash models this key can use, newest first, for when the chosen one is busy.
+  async function otherFlash(skip) {
+    const res = await fetch(GEMINI.replace(/models\/$/, 'models?pageSize=200'), { headers: { 'x-goog-api-key': settings().apiKey } });
+    if (!res.ok) return [];
+    const { models = [] } = await res.json();
+    const version = (name) => Number((name.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+    return models
+      .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map((m) => m.name.replace(/^models\//, ''))
+      .filter((n) => /^gemini-[\d.]+-flash(-lite)?$/.test(n) && n !== skip)
+      .sort((a, b) => version(b) - version(a) || a.length - b.length)
+      .slice(0, 2);
+  }
+
   async function geminiGenerate(body) {
     const key = settings().apiKey;
+    const model = textModel();
     try {
-      return await gemini(textModel(), 'generateContent', body, key);
+      return await patient(() => gemini(model, 'generateContent', body, key));
     } catch (e) {
-      if (!isRetired(e.status, e.message)) throw e;
-      const next = await pickNewestFlash();
-      if (!next || next === e.model) throw e;
-      return gemini(next, 'generateContent', body, key);
+      if (isRetired(e.status, e.message)) {
+        const next = await pickNewestFlash();
+        if (!next || next === e.model) throw e;
+        return gemini(next, 'generateContent', body, key);
+      }
+      if (!isBusy(e.status, e.message)) throw e;
+      // Busy: try other Flash models once each, without changing the saved choice.
+      for (const alt of await otherFlash(model)) {
+        try {
+          return await gemini(alt, 'generateContent', body, key);
+        } catch (e2) {
+          if (!isBusy(e2.status, e2.message)) throw e2;
+        }
+      }
+      throw e;
     }
   }
 
@@ -165,7 +211,7 @@
       return data.choices?.[0]?.message?.content || '';
     };
     try {
-      return await send(textModel());
+      return await patient(() => send(textModel()));
     } catch (e) {
       if (!isRetired(e.status, e.message)) throw e;
       const next = await pickChatModel();
@@ -214,7 +260,7 @@
     const key = embedKey();
     const out = [];
     for (let i = 0; i < texts.length; i += 100) {
-      const data = await gemini(
+      const data = await patient(() => gemini(
         EMBED_MODEL,
         'batchEmbedContents',
         {
@@ -226,7 +272,7 @@
           })),
         },
         key
-      );
+      ));
       out.push(...data.embeddings.map((e) => e.values));
     }
     return out;

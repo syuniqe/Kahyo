@@ -2423,6 +2423,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
 
   function init() {
     migrate();
+    LLM.onBusy = (n) => setStatus(`The AI is busy right now. Trying again (${n} of 2)…`, 'warn');
     $('#legend').innerHTML =
       '<span class="legend-geo">On course climbs at 35° · the line turns by its direction · line length = magnitude · circle size = intensity · click a link to delete it</span>' +
       Object.values(EDGE_TYPES)
