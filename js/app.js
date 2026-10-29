@@ -222,7 +222,12 @@
 
   // Terminancy factor: the writer's override, else automatic from the planned length.
   function tfValue() {
-    return Number.isFinite(journey.tf) ? journey.tf : NSMM.autoTerminancy(journey.plannedLength);
+    return Number.isFinite(journey.tf) ? journey.tf : journey.engine?.autoTf ?? 0.35;
+  }
+
+  // Intensity for display: the AI's or the writer's value, else the server's estimate.
+  function intensityOf(f) {
+    return Number.isFinite(f.intensity) ? f.intensity : f.metrics?.intensity ?? 0.5;
   }
 
   function fsText(f) {
@@ -342,56 +347,25 @@
 
   // ---------- extraction ----------
 
-  const EXTRACT_SCHEMA = `{
-  "footsteps": [{
-    "events_count": how many separate story events this Footstep holds (1 if it is one step),
-    "event": "the writer's own words for this Footstep, with only grammar and filler fixed (change under 5% of the words; never paraphrase or summarise)",
-    "subjects": ["canonical character or entity names involved"],
-    "context": "when and in what circumstances, if the writer said",
-    "environment": ["the place or space where it happens, if the writer said"],
-    "intensity": 0.0-1.0 (impact on the story: 0 = a quiet beat, 1 = changes everything),
-    "promises": ["setups planted that the story must later pay off"],
-    "seeds": [{"target": "existing id like FS#003, or NEW1/NEW2 for an earlier footstep in this same list", "type": "cause|casual|character_arc", "direction": "from (the target causes this one) or to (this one causes the target)"}]
-  }],
-  "place_after": "the existing main-thread id these new Footsteps come right after in STORY time, START if they come before everything, or END if they simply continue the story",
-  "aliases": [{"alias": "another name or description used for a character", "name": "that character's canonical name"}],
-  "new_traits": [{"character": "name", "trait": "one short trait, e.g. jealous, arrogant, never lies"}],
-  "physical_features": [{"character": "name", "feature": "a short phrase about body, face, age, clothing or voice the writer stated, e.g. 'big, fat king'"}],
-  "violations": [{"footstep": "NEW1", "character": "name", "trait": "exact existing trait text", "severity": "soft|hard", "suggestion": "how the writer could keep the character true to the trait, or justify the change"}]
-}`;
+  // What the server needs to read a new idea; the prompt itself lives on the server.
+  function extractData(transcript) {
+    return {
+      title: journey.title,
+      main: mainInOrder().map((f) => ({ id: f.id, event: f.event })),
+      branches: journey.footsteps.filter((f) => f.thread === 'branch').map((f) => ({ id: f.id, event: f.event })),
+      characters: characterData(),
+      transcript,
+    };
+  }
 
-  function extractPrompt(transcript) {
-    const recent = [
-      ...mainInOrder().map((f, i) => `${i + 1}. ${f.id}: ${f.event}`),
-      ...journey.footsteps.filter((f) => f.thread === 'branch').map((f) => `   (side path) ${f.id}: ${f.event}`),
-    ]
-      .slice(-80)
-      .join('\n');
-    const people = journey.characters
-      .map((c) => {
-        const aka = c.aliases?.length ? ` (also called: ${c.aliases.join(', ')})` : '';
-        const traits = c.traits.length ? `: traits ${c.traits.map((t) => `"${t.text}"`).join(', ')}, strictness ${(c.strictness ?? 0.6).toFixed(1)}` : '';
-        return `- ${c.name}${aka}${c.physical.length ? ` [looks: ${c.physical.join('; ')}]` : ''}${traits}`;
-      })
-      .join('\n');
-    return `You are the extraction layer of Kahyo, a voice-first storytelling system based on the Wordwalk Model, a Narrative Storyline Mapping Model (NSMM), and its ThoughtSense Engine.
-A writer just spoke a fragment of their story out loud. Turn it into exactly ONE Footstep, however many sentences it has. Never split it: the writer decides that. Instead, set events_count to the number of separate story events it holds.
-The event is the writer's own words. Keep their wording; fix only grammar and drop filler ("um", "so basically"). Do not summarise, shorten or rephrase.
-Writers speak out of order. Decide where the new Footsteps belong in the story's timeline and set place_after. Use END unless the writer signals otherwise (e.g. "before the king...", "earlier,", "at the start", "back in step 2") or the content clearly happens earlier. Use the story so far to understand pronouns and references.
-Characters: use one canonical name per person. When the writer reveals that a description or second name is someone already known (e.g. "the prince's wife" is Rita, or Arjun's father turns out to be Krishna), add it to aliases and use the canonical name in subjects.
-Link each new Footstep to earlier ones for every real relationship: cause (one makes the other happen; if one changed, the other would too; this includes a setup and its payoff, or a promise and where it is kept), casual (a looser connection, like a shared theme, place or object), or character_arc (the same character's change or return). Most Footsteps have one or two links. Story order is tracked separately.
-Check every new Footstep against the character traits below. Strictness goes from 0 (the character may evolve freely) to 1 (must never break a trait). Report a violation only when a character acts against a trait by more than their strictness allows. Use "hard" when strictness is 0.8 or more.
-Only report new_traits the writer explicitly states about a character's lasting nature, as short list items (jealous, arrogant, loyal to the king), and physical_features the writer states about how a character looks or sounds.
-
-Journey: ${journey.title}
-Main thread in story order (oldest first):
-${recent || '(none yet)'}
-
-Characters:
-${people || '(none yet)'}
-
-Writer's spoken fragment:
-"""${transcript}"""`;
+  function characterData() {
+    return journey.characters.map((c) => ({
+      name: c.name,
+      aliases: c.aliases || [],
+      physical: c.physical || [],
+      traits: c.traits.map((t) => t.text),
+      strictness: c.strictness ?? 0.6,
+    }));
   }
 
   // Free, no-key fallback: one Footstep per sentence, subjects from known
@@ -453,7 +427,7 @@ Writer's spoken fragment:
   async function addThought(transcript, preExtracted, placeAfter) {
     transcript = transcript.trim();
     if (!transcript) return;
-    const extracted = preExtracted || (LLM.hasKey() ? await LLM.generateJSON(extractPrompt(transcript), EXTRACT_SCHEMA) : offlineExtract(transcript));
+    const extracted = preExtracted || (LLM.hasKey() ? await LLM.run('extract', extractData(transcript)) : offlineExtract(transcript));
     let items = (extracted.footsteps || []).filter((f) => f && f.event);
     // A spoken idea becomes one Footstep. If the AI returned several anyway, join them.
     if (!preExtracted && items.length > 1) {
@@ -601,6 +575,13 @@ Writer's spoken fragment:
             text: `${f.id} may hold ${f.events} Footsteps in one. Split it, or keep it as one?`,
             maths: `${f.events} events`,
           });
+        if (m.repeat && fsById(m.repeat.id))
+          addNote({
+            kind: 'repeat',
+            fsId: f.id,
+            text: `${f.id} says much the same as ${m.repeat.id}. Delete it, or keep both?`,
+            maths: `${Math.round(m.repeat.similarity * 100)}% alike`,
+          });
         if (f.thread === 'main') {
           if (m.dirStatus === 'off')
             addNote({
@@ -700,11 +681,18 @@ Writer's spoken fragment:
   async function relabelStages(allowAI) {
     const main = mainInOrder();
     const n = main.length;
-    if (n < NSMM.stageLabelAfter(journey.plannedLength)) {
+    let plan;
+    try {
+      plan = await NSMM.stages(n, journey.plannedLength);
+    } catch (e) {
+      setStatus(e.message, 'warn');
+      return;
+    }
+    if (n < plan.after) {
       journey.footsteps.forEach((f) => (f.stage = null));
       journey.stage = null;
       journey.aiStaged = 0;
-      rescoreAll();
+      await rescoreAll();
       return;
     }
     let labels = null;
@@ -723,7 +711,7 @@ Writer's spoken fragment:
         let prev = NSMM.STAGES[0];
         labels = main.map((f) => (prev = f.stage || prev));
       } else {
-        labels = NSMM.heuristicStages(n, journey.plannedLength);
+        labels = plan.labels;
       }
     }
     labels = NSMM.monotonicStages(labels);
@@ -735,42 +723,34 @@ Writer's spoken fragment:
         f.stage = root?.stage || null;
       });
     journey.stage = labels[n - 1];
-    rescoreAll();
+    await rescoreAll();
   }
 
   async function aiStages(main) {
-    const res = await LLM.generateJSON(
-      `You label the stages of a story being written in Kahyo (Wordwalk Journey Mapping). The story is unfinished: ${main.length} of about ${journey.plannedLength} planned Footsteps are written.
-Stages, in order:
-- Origin: the world and characters before the story moves.
-- Pandiculation: the story stretches open: the inciting event and new threads.
-- Maxspan: the widest point: most threads open, complications peak.
-- Convergence: threads pull together toward the end.
-- Conclusion: the decisive confrontation and its resolution; the story closes.
-Label every Footstep. Stages only move forward through the list. Do not use a stage the story has not reached yet.
-
-Footsteps in story order:
-${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
-      '{"stages":[{"id":"FS#001","stage":"Origin|Pandiculation|Maxspan|Convergence|Conclusion"}]}'
-    );
+    const res = await LLM.run('stages', { plannedLength: journey.plannedLength, main: main.map((f) => ({ id: f.id, event: f.event })) });
     const byId = Object.fromEntries((res.stages || []).map((s) => [s.id, NSMM.stageName(s.stage)]));
     let prev = NSMM.STAGES[0];
     return main.map((f) => (prev = NSMM.STAGES.includes(byId[f.id]) ? byId[f.id] : prev));
   }
 
-  // Re-score every Footstep in writing order, each against the main thread as
-  // it stood before it. A side-path Footstep's intent vector is measured from
-  // the direction its path started at.
-  function rescoreAll() {
-    const prior = [];
-    const tf = tfValue();
-    journey.footsteps.forEach((f) => {
-      const start = f.thread === 'branch' ? pathStart(f) : null;
-      const from = start && start !== f ? start.metrics : null;
-      f.metrics = NSMM.scoreFootstep(f, prior, { tf, stage: f.stage, rootDirection: from?.direction, rootMagnitude: from?.magnitude });
-      if (f.thread === 'branch') f.metrics.branch = NSMM.branchState(f.metrics.iv.length, tf, journey.branchShare);
-      if (f.thread === 'main') prior.push(f);
-    });
+  // Re-score every Footstep on Kahyo's server (the ThoughtSense Engine runs there).
+  // A newer call wins: an older answer that comes back late is dropped.
+  let scoreRun = 0;
+  async function rescoreAll() {
+    const mine = ++scoreRun;
+    const j = journey;
+    const footsteps = j.footsteps.map((f) => ({ ...f, pathStart: f.thread === 'branch' ? pathStart(f).id : null }));
+    let out;
+    try {
+      out = await NSMM.score({ footsteps, tf: Number.isFinite(j.tf) ? j.tf : null, plannedLength: j.plannedLength, branchShare: j.branchShare, stage: j.stage });
+    } catch (e) {
+      setStatus(e.message, 'warn');
+      return false;
+    }
+    if (mine !== scoreRun || journey !== j) return false;
+    j.footsteps.forEach((f) => (f.metrics = out.metrics[f.id] || f.metrics));
+    j.engine = out.info;
+    return true;
   }
 
   // ---------- footstep edits ----------
@@ -785,6 +765,8 @@ ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
     journey.edges = journey.edges.filter((e) => e.from !== id && e.to !== id);
     journey.alerts.filter((x) => x.fsId === id).forEach((x) => (x.open = false));
     if (selectedId === id) selectedId = null;
+    // Reuse the numbers after the highest one left, so deleting the last Footstep frees its number.
+    journey.nextId = journey.footsteps.reduce((n, f) => Math.max(n, Number(f.id.replace(/\D/g, '')) || 0), 0) + 1;
   }
 
   // Split a heavy Footstep in two. The first part keeps the id and incoming
@@ -795,10 +777,7 @@ ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
     let parts = null;
     if (LLM.hasKey()) {
       setStatus('Splitting ' + id + ' into two Footsteps…');
-      const r = await LLM.generateJSON(
-        `Split this story Footstep into exactly two smaller, consecutive Footsteps. Keep the writer's own words and facts; do not add events. Rate each one's intensity (impact on the story) from 0 to 1.\nEvent: ${f.event}\nContext: ${f.context}\nSubjects: ${(f.subjects || []).join(', ')}\nPromises: ${(f.promises || []).join('; ')}\nEnvironment: ${(f.environment || []).join('; ')}`,
-        '{"footsteps":[{"event":"","subjects":[""],"context":"","promises":[""],"environment":[""],"intensity":0.5},{"event":"","subjects":[""],"context":"","promises":[""],"environment":[""],"intensity":0.5}]}'
-      );
+      const r = await LLM.run('split', { event: f.event, context: f.context, subjects: f.subjects, promises: f.promises, environment: f.environment });
       if (Array.isArray(r.footsteps) && r.footsteps.length >= 2) parts = r.footsteps.slice(0, 2);
     }
     if (!parts) {
@@ -865,10 +844,7 @@ ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
     let found = [];
     if (LLM.hasKey()) {
       setStatus(`Reading the story for how ${c.name} looks…`);
-      const r = await LLM.generateJSON(
-        `From these story notes, list the physical features of the character "${c.name}" that the writer stated or clearly implied: body, face, age, clothing, voice, marks. Short phrases. Do not invent anything.\n\n${texts.join('\n')}`,
-        '{"physical":["short phrase"]}'
-      );
+      const r = await LLM.run('physical', { name: c.name, texts });
       found = r.physical || [];
     } else {
       found = [...new Set(texts.flatMap((t) => offlinePhysical(t, c.name)))];
@@ -909,15 +885,12 @@ ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
     if (!fs || !c) return;
     if (!LLM.hasKey()) return setStatus('Remolding needs an AI key. Edit the event yourself, or loosen the character.', 'warn');
     setStatus(`Remolding ${fs.id} so ${c.name} stays true to "${a.trait}"…`);
-    const r = await LLM.generateJSON(
-      `Rewrite this story Footstep as little as possible so that ${c.name} no longer acts against the trait "${a.trait}". Keep the writer's words, other events and every other character as they are.\nFootstep: ${fs.event}${a.suggestion ? `\nHint: ${a.suggestion}` : ''}`,
-      '{"event":"the rewritten Footstep"}'
-    );
+    const r = await LLM.run('remold', { name: c.name, trait: a.trait, event: fs.event, suggestion: a.suggestion || '' });
     if (!r.event) throw new Error('The AI did not return a rewrite. Try again.');
     fs.event = String(r.event);
     fs.violations = fs.violations.filter((v) => !(v.character === c.name && v.trait === a.trait));
     await reembed(fs);
-    rescoreAll();
+    await rescoreAll();
     a.open = false;
     a.resolution = 'remold';
     save();
@@ -984,33 +957,14 @@ ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
         (branches.length ? `\n\n## Side paths you explored\n\n${branches.map((f) => `- ${f.event}`).join('\n')}` : '');
     } else {
       setStatus('Building a helper draft from every Footstep…');
-      const people = journey.characters
-        .map((c) => `${c.name}${c.aliases?.length ? ` (also called ${c.aliases.join(', ')})` : ''}${c.physical.length ? ` (looks: ${c.physical.join(', ')})` : ''}${c.traits.length ? `; traits: ${c.traits.map((t) => t.text).join(', ')}` : ''}`)
-        .join('\n');
       // Grounded on purpose: the draft may only use what the writer said.
       // Anything missing becomes a [question] for the writer, never invented.
-      const raw = await LLM.generateText(
-        `You help a writer; you never replace them. Turn the story Footsteps below into a helper draft of "${journey.title}".
-
-STRICT RULES:
-- Use ONLY the facts in the Footsteps, characters and context below. Do not invent any new character, place, object, event, backstory, motive, dialogue or description.
-- If a scene needs a detail the writer has not given, write a short question in brackets for the writer instead, e.g. [What does the king build?]. Never fill it in yourself.
-- One short paragraph per Footstep, 1 to 3 sentences, about as long as the Footstep itself. Keep the writer's own wording where you can. Do not pad.
-- Start each paragraph with the Footstep number in bold, e.g. **3.** Keep the Footsteps in this order.
-- Group the paragraphs under "## <stage>" headings when a stage is given.
-- No word counts, no notes about length, no commentary.
-- End with "## Open threads": the promises below that later Footsteps do not pay off, one per line. Then "## Side paths": the side-path Footsteps, one per line, if there are any.
-
-Characters:
-${people || '(none)'}
-
-Main story, in order:
-${main.map((f, i) => `${i + 1}. [${f.stage || 'unstaged'}] ${f.event}${f.context ? ` (${f.context})` : ''}${f.environment?.length ? ` | where: ${f.environment.join('; ')}` : ''}${f.subjects?.length ? ` | who: ${f.subjects.join(', ')}` : ''}${f.promises?.length ? ` | promises: ${f.promises.join('; ')}` : ''}`).join('\n')}
-
-Side paths (branches, not in the main story):
-${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
-        { temperature: 0.2 }
-      );
+      const raw = await LLM.run('draft', {
+        title: journey.title,
+        characters: characterData(),
+        main: main.map((f) => ({ stage: f.stage, event: f.event, context: f.context, environment: f.environment, subjects: f.subjects, promises: f.promises })),
+        branches: branches.map((f) => ({ event: f.event })),
+      });
       journey.draft = raw.replace(/\s*\(\s*\d+\s*words?\s*\)/gi, '');
     }
     save();
@@ -1042,7 +996,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
         const branches = j.footsteps.filter((f) => f.thread === 'branch').length;
         const open = j.alerts.filter((a) => a.open).length;
         const pct = Math.min(100, Math.round((100 * main) / (j.plannedLength || 60)));
-        const after = NSMM.stageLabelAfter(j.plannedLength);
+        const after = j.engine?.stageAfter ?? 12;
         const stage = main >= after && j.stage ? j.stage : `Stages after ${after} Footsteps`;
         return `<article class="jcard">
           <a class="jcard-main" href="#/j/${esc(j.id)}">
@@ -1081,6 +1035,13 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     $('#home').hidden = true;
     $('#journey-view').hidden = false;
     renderAll({ fit: true });
+    // Journeys from before the engine moved to the server get their numbers once.
+    if (!j.engine && j.footsteps.length)
+      rescoreAll().then((ok) => {
+        if (!ok || journey !== j) return;
+        save();
+        renderAll();
+      });
     $('#drawer').hidden = true;
     placeDrawer();
     if (!inspecting()) showTab('notes');
@@ -1235,7 +1196,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       const heavy = m.sizeFlag === 'jump';
       const over = f.thread === 'main' ? m.dirStatus === 'off' : m.branch === 'terminate' && !pathStart(f).ended;
       const wander = f.thread === 'main' && m.dirStatus === 'wander';
-      const intensity = NSMM.intensity(f);
+      const intensity = intensityOf(f);
       const status = f.thread === 'main' ? { on: 'on course', wander: 'wandering slightly', off: 'off course' }[m.dirStatus] || '' : 'side path';
       return {
         id: f.id,
@@ -1427,14 +1388,14 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     const main = journey.footsteps.filter((f) => f.thread === 'main');
     const branches = journey.footsteps.filter((f) => f.thread === 'branch');
     const open = journey.alerts.filter((a) => a.open).length;
-    const st = NSMM.threadStats(main);
+    const st = journey.engine?.stats;
     const count = (fn) => main.filter((f) => f.metrics && fn(f.metrics)).length;
     const off = count((m) => m.dirStatus === 'off');
     const wander = count((m) => m.dirStatus === 'wander');
     const jumps = count((m) => m.sizeFlag === 'jump');
     const crawls = count((m) => m.sizeFlag === 'crawl');
     const tf = tfValue();
-    const after = NSMM.stageLabelAfter(journey.plannedLength);
+    const after = journey.engine?.stageAfter ?? 12;
     const stat = (v, word, cls = '') => `<div class="${cls}"><span>${v}</span>${word}</div>`;
     $('#stats').innerHTML =
       stat(main.length, 'on the main thread') +
@@ -1445,11 +1406,11 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       stat(`${jumps} / ${crawls}`, 'jumps / crawls') +
       stat(st ? st.magnitude.toFixed(1) : '–', 'average magnitude') +
       stat(st ? st.intensity.toFixed(2) : '–', 'average intensity') +
-      stat(`${NSMM.directionLimit(tf, journey.stage).toFixed(0)}°`, `direction limit${journey.stage ? ' in ' + journey.stage : ''}`);
+      stat(Number.isFinite(journey.engine?.limit) ? `${journey.engine.limit.toFixed(0)}°` : '–', `direction limit${journey.stage ? ' in ' + journey.stage : ''}`);
     $('#tf').value = tf;
     $('#tf-val').textContent = tf.toFixed(2);
     $('#tf-note').textContent = Number.isFinite(journey.tf)
-      ? `Set by you. Automatic for ${journey.plannedLength} planned Footsteps would be ${NSMM.autoTerminancy(journey.plannedLength).toFixed(2)}.`
+      ? `Set by you. Automatic for ${journey.plannedLength} planned Footsteps would be ${(journey.engine?.autoTf ?? 0.35).toFixed(2)}.`
       : `Automatic from ${journey.plannedLength} planned Footsteps: longer stories are more lenient. Drag to override.`;
     if (Number.isFinite(journey.tf) && !$('#tf-auto')) $('#tf-note').insertAdjacentHTML('beforeend', ' <a href="#" id="tf-auto">Back to automatic</a>');
     $('#branch-share').value = journey.branchShare;
@@ -1551,6 +1512,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
   const NOTE_TITLES = {
     off: 'Off course',
     split: 'May be two Footsteps',
+    repeat: 'Repeats an earlier Footstep',
     wander: 'Wandering slightly',
     jump: 'Jump',
     crawl: 'Crawl',
@@ -1571,6 +1533,8 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       case 'jump':
       case 'split':
         return b('split', 'Split in two') + b('accept', 'Keep as one');
+      case 'repeat':
+        return b('remove', 'Delete this one') + b('accept', 'Keep both');
       case 'terminate':
         return b('end', 'Let it end here') + b('change', 'Change its steps') + b('accept', 'Keep going');
       case 'trait':
@@ -1691,7 +1655,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       </div>
       <div class="iv">
         <div class="iv-title">Intensity<small class="mword">0 to 1 · circle size</small></div>
-        <div class="slider-row"><input type="range" min="0" max="1" step="0.05" data-intensity value="${NSMM.intensity(f)}" aria-label="Intensity" /><b id="v-int"></b></div>
+        <div class="slider-row"><input type="range" min="0" max="1" step="0.05" data-intensity value="${intensityOf(f)}" aria-label="Intensity" /><b id="v-int"></b></div>
         <p class="muted small" id="int-note"></p>
         <div id="iv-readout" class="inspect-only"></div>
       </div>`;
@@ -1701,7 +1665,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
   function updateReadouts(f) {
     const m = f.metrics || {};
     const ai = Number.isFinite(f.intensity);
-    $('#v-int').textContent = NSMM.intensity(f).toFixed(2);
+    $('#v-int').textContent = intensityOf(f).toFixed(2);
     $('#int-note').textContent = ai ? (f.intensityByWriter ? 'Set by you.' : 'Judged by the AI. Drag to change it.') : 'Estimated offline from how much happens. Drag to set it.';
     $('[data-split]')?.classList.toggle('primary', m.sizeFlag === 'jump');
     const box = $('#iv-readout');
@@ -2028,7 +1992,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     // change, and that button's own action must still run.
     return (async () => {
       if (['event', 'context', 'subjects'].includes(field)) await reembed(f);
-      rescoreAll();
+      await rescoreAll();
       syncNotes([f.id]);
       save();
       renderGraph();
@@ -2083,19 +2047,20 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       });
     });
     // Factors: outlines and numbers follow the slider live; notes are raised on release.
-    const factorChanged = () => {
-      rescoreAll();
-      renderGraph();
-      renderStats();
-      if (selectedId && fsById(selectedId)) updateReadouts(fsById(selectedId));
-    };
-    const factorSettled = () => {
-      rescoreAll();
-      syncNotes();
-      checkDrift();
-      save();
-      renderAll();
-    };
+    const factorChanged = () =>
+      rescoreAll().then((ok) => {
+        if (!ok) return;
+        renderGraph();
+        renderStats();
+        if (selectedId && fsById(selectedId)) updateReadouts(fsById(selectedId));
+      });
+    const factorSettled = () =>
+      rescoreAll().then(() => {
+        syncNotes();
+        checkDrift();
+        save();
+        renderAll();
+      });
     $('#tf').addEventListener('input', (e) => {
       journey.tf = Math.round(Number(e.target.value) * 100) / 100;
       factorChanged();
@@ -2287,8 +2252,8 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       if (!f || !e.target.hasAttribute('data-intensity')) return;
       f.intensity = Number(e.target.value);
       f.intensityByWriter = true;
-      rescoreAll();
-      updateReadouts(f);
+      $('#v-int').textContent = f.intensity.toFixed(2);
+      rescoreAll().then((ok) => ok && journey && fsById(f.id) && updateReadouts(f));
     });
     $('#modifier').addEventListener('change', (e) => {
       if (!e.target.hasAttribute('data-intensity')) return;
@@ -2382,7 +2347,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       if (!journey) return;
       run(async () => {
         await ensureEmbedder();
-        rescoreAll();
+        await rescoreAll();
         save();
         renderAll();
         setStatus(LLM.hasKey() ? `${LLM.providerLabel()} connected. Kahyo will now extract Footsteps with AI.` : 'Offline mode. Footsteps are split by sentence.', 'ok');
@@ -2423,7 +2388,6 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
 
   function init() {
     migrate();
-    LLM.onBusy = (n) => setStatus(`The AI is busy right now. Trying again (${n} of 2)…`, 'warn');
     $('#legend').innerHTML =
       '<span class="legend-geo">On course climbs at 35° · the line turns by its direction · line length = magnitude · circle size = intensity · click a link to delete it</span>' +
       Object.values(EDGE_TYPES)

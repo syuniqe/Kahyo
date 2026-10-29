@@ -1,7 +1,7 @@
 // ThoughtSense Engine v2 tests: node --test tests/nsmm.test.js
 const test = require('node:test');
 const assert = require('node:assert');
-const N = require('../js/nsmm.js');
+const N = require('../server/thoughtsense.js');
 
 // Seeded random vectors so every run is the same.
 let seed = 7;
@@ -108,4 +108,24 @@ test('a side path starts at branching factor near 0 and terminates as it drifts'
 
 test('stages only move forward', () => {
   assert.deepStrictEqual(N.monotonicStages(['Origin', 'Maxspan', 'Origin', 'Climax']), ['Origin', 'Maxspan', 'Maxspan', 'Conclusion']);
+});
+
+test('a Footstep that says the same again is flagged as a repeat', () => {
+  const a = { id: 'FS#001', thread: 'main', event: 'Meera finds the forged ledger under the bed', subjects: [], embedding: N.localEmbedding('Meera finds the forged ledger under the bed') };
+  const b = { id: 'FS#002', thread: 'main', event: 'The caravan reaches the river at noon', subjects: [], embedding: N.localEmbedding('The caravan reaches the river at noon') };
+  const c = { id: 'FS#003', thread: 'main', event: 'Meera finds the forged ledger under his bed', subjects: [], embedding: N.localEmbedding('Meera finds the forged ledger under his bed') };
+  const out = N.scoreJourney({ footsteps: [a, b, c] });
+  assert.strictEqual(out.metrics['FS#002'].repeat, null);
+  assert.strictEqual(out.metrics['FS#003'].repeat.id, 'FS#001');
+  assert.strictEqual(out.info.autoTf, 0.35);
+  assert.strictEqual(out.info.stageAfter, 12);
+});
+
+test('scoreJourney measures a side path from its first Footstep', () => {
+  const main = steady(12).map((f, i) => ({ ...f, id: 'M' + i, thread: 'main', event: 'word' + i + ' story beat number ' + i }));
+  const s1 = { ...fs(vec()), id: 'B1', thread: 'branch', pathStart: 'B1', event: 'alpha beta gamma delta' };
+  const s2 = { ...fs(vec()), id: 'B2', thread: 'branch', pathStart: 'B1', event: 'epsilon zeta eta theta' };
+  const out = N.scoreJourney({ footsteps: [...main, s1, s2] });
+  assert.ok(out.metrics.B1.iv.length < 0.1);
+  assert.ok(['ok', 'drifting', 'terminate'].includes(out.metrics.B2.branch));
 });

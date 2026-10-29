@@ -12,7 +12,7 @@ This is a working demo of the **Wordwalk Model**, a Narrative Storyline Mapping 
 | Embeddings | Gemini `gemini-embedding-001` free tier, or an offline fallback (text model defaults to `gemini-3.8-flash` and switches to the newest Flash automatically if Google retires it) |
 | Storage | Your browser (localStorage), plus JSON export / import |
 
-Without a key the app still works in **offline mode**: one Footstep per sentence, simple local embeddings, and an outline instead of prose.
+Without a key the app still works in **offline mode**: one Footstep per idea, simple local embeddings, and an outline instead of prose. It needs a connection, because the engine runs on the server.
 
 ## Try it
 

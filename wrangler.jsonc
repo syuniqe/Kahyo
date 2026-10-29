@@ -1,11 +1,15 @@
-// Cloudflare Workers: serve the built app in dist/ as static files.
+// Cloudflare Workers: the Worker runs the engine and prompts (server/), and serves
+// the built app in dist/ as static files.
 {
   "name": "app",
+  "main": "server/worker.js",
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
   "preview_urls": true,
   "assets": {
     "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"],
     "not_found_handling": "single-page-application"
   }
 }
