@@ -156,7 +156,7 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: var(--h
 body.view-home .journey-only { display: none; }
 
 /* busy: the logo is scribbled stroke by stroke, like a pen (driven from app.js) */
-.scribble { width: 100px; height: 120px; visibility: hidden; flex: none; }
+.scribble { width: 60px; height: 72px; visibility: hidden; flex: none; }
 .scribble path { fill: none; stroke: var(--brand); stroke-width: 26; stroke-linecap: round; stroke-linejoin: round; }
 body.busy .scribble { visibility: visible; }
 
@@ -427,8 +427,7 @@ dialog .actions { justify-content: flex-end; margin-top: 16px; }
   .home { padding: 20px 16px; }
 }
 .graph-card { position: relative; }
-.graph-head .scribble { position: absolute; right: 20px; top: 8px; z-index: 5; pointer-events: none; }
-.graph-head .stats { order: 3; flex-basis: 100%; }
+.graph-wrap .scribble { position: absolute; right: 14px; bottom: 12px; width: 60px; height: 72px; z-index: 5; pointer-events: none; }
 
 /* drift banner and link tool on the graph */
 .drift-banner { position: absolute; left: 12px; top: 12px; z-index: 4; background: var(--amber); color: #1d1206; font-weight: 600; font-size: 12.5px; }
@@ -503,3 +502,34 @@ body.mode-write .iv-wrap { grid-template-columns: 1fr; }
 .drawer.docked { position: static; width: auto; box-shadow: none; border: 0; padding: 0; background: transparent; animation: none; overflow: visible; border-radius: 0; }
 .drawer.docked [data-drawer-close] { display: none; }
 @media (max-width: 1180px) { .drawer.docked { position: static; max-height: none; } }
+
+/* Write shows Notes and Draft; Inspect shows Footstep and Storyline */
+body.mode-inspect .write-only { display: none !important; }
+
+/* the side pane folds away */
+.tabs-row { display: flex; align-items: center; gap: 8px; margin: -6px -6px 18px; }
+.tabs-row .tabs { flex: 1; margin: 0; }
+.pane-btn { width: 32px; height: 32px; min-height: 32px; padding: 0; font-size: 16px; color: var(--muted); }
+.pane-open { display: none; position: absolute; right: 0; top: 50%; transform: translateY(-50%); z-index: 11;
+  width: 28px; height: 72px; min-height: 0; padding: 0; border-radius: 14px 0 0 14px; background: var(--card); box-shadow: var(--shadow); color: var(--muted); }
+body.pane-closed .layout { grid-template-columns: 340px minmax(0, 1fr); }
+body.pane-closed .col.right { display: none; }
+body.pane-closed .pane-open { display: flex; }
+@media (max-width: 1180px) { body.pane-closed .layout { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); } }
+@media (max-width: 760px) { body.pane-closed .layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* Storyline */
+.slider-row { display: flex; align-items: center; gap: 10px; }
+.slider-row input { flex: 1; padding: 0; accent-color: var(--brand); }
+.slider-row b { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+.planned-row { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.planned-row input { width: 72px; height: var(--ctl-sm); min-height: var(--ctl-sm); text-align: center; padding: 0 8px; }
+.health-why { display: block; width: 100%; height: auto; min-height: 0; padding: 12px 14px; margin-bottom: 16px; border-radius: 14px; justify-content: flex-start; text-align: left; white-space: normal; line-height: 1.45; background: var(--card2); color: var(--ink); font-weight: 500; }
+#panel-storyline .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px 8px; margin-top: 8px; }
+#clear-notes { margin-top: 12px; }
+.readout { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 13px; margin: 6px 0 0; }
+.readout dt { color: var(--muted); }
+.readout dd { margin: 0; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.readout dd.warn { color: var(--amber); }
+.fs-notes { margin-top: 12px; }
+dialog label[hidden] { display: none; }

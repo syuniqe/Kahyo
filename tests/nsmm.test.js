@@ -1,71 +1,110 @@
-// Run with: node --test tests/
+// ThoughtSense Engine v2 tests: node --test tests/nsmm.test.js
 const test = require('node:test');
 const assert = require('node:assert');
 const N = require('../js/nsmm.js');
 
-test('slot intensity uses the documented weights', () => {
-  // Worked example from the NSMM math doc: 0.35·0.9 + 0.25·2 + 0.25·2 + 0.15·0 = 1.315
-  const fs = { plot_intensity: 0.9, subjects: ['hero', 'villain'], promises: ['a', 'b'], world_rules: [] };
-  assert.ok(Math.abs(N.slotIntensitySum(fs) - 1.315) < 1e-9);
+// Seeded random vectors so every run is the same.
+let seed = 7;
+const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed / 2147483648);
+const gauss = () => Math.sqrt(-2 * Math.log(rnd() || 1e-9)) * Math.cos(2 * Math.PI * rnd());
+const D = 128;
+const unit = (v) => {
+  const n = Math.hypot(...v);
+  return v.map((x) => x / n);
+};
+const vec = () => unit(Array.from({ length: D }, gauss));
+const mix = (a, b, w) => unit(a.map((x, i) => x + w * b[i]));
+const base = vec();
+const fs = (e, words = 12) => ({ event: Array.from({ length: words }, (_, i) => 'word' + i).join(' '), embedding: e, subjects: [], promises: [], environment: [] });
+const steady = (n, noise = 0.8) => Array.from({ length: n }, () => fs(mix(base, vec(), noise)));
+
+test('direction limit X = TF·180·(1.2 − 0.2y), at least 10°', () => {
+  assert.strictEqual(Math.round(N.directionLimit(0.35, 'Origin')), 63);
+  assert.strictEqual(Math.round(N.directionLimit(0.35, 'Climax')), 13);
+  assert.strictEqual(Math.round(N.directionLimit(1, 'Origin')), 180);
+  assert.strictEqual(N.directionLimit(0.1, 'Climax'), 10);
+  assert.strictEqual(N.directionLimit(0.35, null), N.directionLimit(0.35, 'Origin'));
 });
 
-test('stage multiplier scales magnitude', () => {
-  const fs = { event: 'The hero discovers the lair', plot_intensity: 1, subjects: ['hero'] };
-  const origin = N.magnitude(fs, 'Origin');
-  const climax = N.magnitude(fs, 'Climax');
-  assert.ok(Math.abs(climax / origin - 2.0 / 0.6) < 1e-9);
+test('terminancy factor grows with the planned length', () => {
+  assert.strictEqual(N.autoTerminancy(60), 0.35);
+  assert.strictEqual(N.autoTerminancy(30), 0.3);
+  assert.ok(N.autoTerminancy(300) > N.autoTerminancy(60));
+  assert.ok(N.autoTerminancy(1) >= 0.1);
 });
 
-test('first footstep is aligned by definition', () => {
-  const m = N.scoreFootstep({ event: 'Opening', embedding: [1, 0] }, [], 'Origin');
-  assert.strictEqual(m.angle, 0);
-  assert.strictEqual(m.terminancy, 0);
-  assert.strictEqual(m.is_branch_candidate, false);
+test('stage labels appear at 20% of the plan, between 3 and 20', () => {
+  assert.strictEqual(N.stageLabelAfter(60), 12);
+  assert.strictEqual(N.stageLabelAfter(10), 3);
+  assert.strictEqual(N.stageLabelAfter(300), 20);
 });
 
-test('an opposite, diverging footstep crosses the terminancy threshold', () => {
-  const base = { event: 'The heist team plans the robbery', subjects: ['A'], plot_intensity: 0.6, intent_signal: 0.5 };
-  const prior = [];
-  for (let i = 0; i < 3; i++) {
-    const f = { ...base, embedding: [1, 0.1 * i] };
-    f.metrics = N.scoreFootstep(f, prior, 'Pandiculation');
-    prior.push(f);
-  }
-  const tangent = { ...base, intent_signal: -1, embedding: [-1, 0] };
-  const m = N.scoreFootstep(tangent, prior, 'Pandiculation');
-  assert.ok(m.angle > 170, 'angle near 180°');
-  assert.ok(m.contradiction_review);
-  assert.ok(m.is_branch_candidate);
+test('magnitude ignores filler and repeats', () => {
+  const filler = N.magnitude({ event: 'So um basically he like walks to the door and so yeah he walks to the door', subjects: ['he'] });
+  const dense = N.magnitude({ event: "Krishna reveals he is Arjun's father; the war begins", subjects: ['Krishna', 'Arjun'] });
+  assert.ok(dense > filler);
 });
 
-test('local embeddings are unit length and similar for similar text', () => {
-  const a = N.localEmbedding('Meera leads the village onto the salt pans');
-  const b = N.localEmbedding('The village follows Meera to the salt pans');
-  const c = N.localEmbedding('A dhow sails through storms to Zanzibar');
-  assert.ok(Math.abs(Math.hypot(...a) - 1) < 1e-9);
-  assert.ok(N.cosine(a, b) > N.cosine(a, c));
+test('a steady story stays on course with no sign bias', () => {
+  const main = [];
+  let pos = 0;
+  let neg = 0;
+  steady(40).forEach((f, i) => {
+    const m = N.scoreFootstep(f, main, { tf: 0.35 });
+    if (i >= 3) {
+      assert.strictEqual(m.dirStatus, 'on');
+      if (m.direction > 0) pos++;
+      if (m.direction < 0) neg++;
+    }
+    main.push(f);
+  });
+  assert.ok(Math.abs(pos - neg) <= 8, `sign split ${pos}/${neg}`);
 });
 
-test('no stage labels before 12 footsteps', () => {
-  assert.deepStrictEqual(N.heuristicStages(11), new Array(11).fill(null));
-  const s = N.heuristicStages(12, 60);
-  assert.strictEqual(s[0], 'Origin');
-  assert.ok(!s.includes('Climax'));
+test('a far tangent is off course', () => {
+  const main = steady(15);
+  const m = N.scoreFootstep(fs(vec()), main, { tf: 0.35 });
+  assert.strictEqual(m.dirStatus, 'off');
 });
 
-test('stages run through all five over the planned length', () => {
-  const s = N.heuristicStages(20, 20);
-  assert.strictEqual(s[0], 'Origin');
-  assert.strictEqual(s[19], 'Climax');
-  assert.deepStrictEqual(N.monotonicStages(s), s);
+test('nothing is judged before 3 Footsteps', () => {
+  const m = N.scoreFootstep(fs(vec()), steady(2), { tf: 0.35 });
+  assert.strictEqual(m.dirStatus, 'on');
+  assert.strictEqual(m.sizeFlag, null);
 });
 
-test('monotonic stages never step back', () => {
-  assert.deepStrictEqual(N.monotonicStages(['Origin', 'Maxspan', 'Pandiculation']), ['Origin', 'Maxspan', 'Maxspan']);
+test('Jump at double the median size, Crawl at half', () => {
+  const main = steady(6).map((f) => ({ ...f, event: f.event }));
+  main.push(fs(mix(base, vec(), 0.8), 200)); // one outlier must not move the median
+  assert.strictEqual(N.scoreFootstep(fs(mix(base, vec(), 0.8), 12), main, { tf: 0.35 }).sizeFlag, null);
+  assert.strictEqual(N.scoreFootstep(fs(mix(base, vec(), 0.8), 30), main, { tf: 0.35 }).sizeFlag, 'jump');
+  assert.strictEqual(N.scoreFootstep(fs(mix(base, vec(), 0.8), 4), main, { tf: 0.35 }).sizeFlag, 'crawl');
 });
 
-test('data amount grows with words and items', () => {
-  const small = N.dataAmount({ event: 'Meera lies', subjects: ['Meera'] });
-  const big = N.dataAmount({ event: 'Meera lies to Arjun about the Collector at night', context: 'home', subjects: ['Meera', 'Arjun'], promises: ['x'] });
-  assert.ok(big > small);
+test('near-copies do not make a normal Footstep look off course', () => {
+  const e = vec();
+  const main = [fs(e), fs(e), fs(mix(e, vec(), 0.02))];
+  const m = N.scoreFootstep(fs(mix(base, vec(), 0.8)), main, { tf: 0.35 });
+  assert.strictEqual(m.dirStatus, 'on');
+});
+
+test('mixed embedding sizes never give NaN', () => {
+  const main = [...steady(4), fs(N.localEmbedding('the king rides north'))];
+  const m = N.scoreFootstep(fs(mix(base, vec(), 0.8)), main, { tf: 0.35 });
+  assert.ok(Number.isFinite(m.direction));
+});
+
+test('a side path starts at branching factor near 0 and terminates as it drifts', () => {
+  const main = steady(15);
+  const start = N.scoreFootstep(fs(vec()), main, { tf: 0.35 });
+  assert.ok(start.iv.length < 0.1);
+  const later = N.scoreFootstep(fs(vec()), main, { tf: 0.35, rootDirection: start.direction - 120, rootMagnitude: start.magnitude });
+  assert.ok(later.iv.length >= 0.35);
+  assert.strictEqual(N.branchState(later.iv.length, 0.35), 'terminate');
+  assert.strictEqual(N.branchState(0.2, 0.35, 0.45), 'drifting');
+  assert.strictEqual(N.branchState(0.1, 0.35, 0.45), 'ok');
+});
+
+test('stages only move forward', () => {
+  assert.deepStrictEqual(N.monotonicStages(['Origin', 'Maxspan', 'Origin', 'Climax']), ['Origin', 'Maxspan', 'Maxspan', 'Climax']);
 });

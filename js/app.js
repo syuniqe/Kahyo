@@ -5,16 +5,19 @@
   const INDEX_KEY = 'kahyo.journeys';
   const LEGACY_KEY = 'kahyo.journey';
   const jKey = (id) => 'kahyo.j.' + id;
+  // Links between Footsteps. A cause link is stored once (from the cause to its
+  // consequence); the consequence side is shown on the other Footstep automatically.
   const EDGE_TYPES = {
-    causal: { label: 'Causal', color: '#FD3A0A' },
-    temporal: { label: 'Story order', color: '#7a7a8e' },
-    character_arc: { label: 'Character arc', color: '#6db3e0' },
-    setup_resolution: { label: 'Setup → resolution', color: '#4a8c6a' },
-    thematic: { label: 'Thematic', color: '#b07ad4' },
+    cause: { label: 'Cause', back: 'Consequence of', color: '#FD3A0A' },
+    casual: { label: 'Casual link', back: 'Casual link', color: '#b07ad4' },
+    character_arc: { label: 'Character arc', back: 'Character arc', color: '#6db3e0' },
+    temporal: { label: 'Story order', back: 'Story order', color: '#7a7a8e' },
   };
-  // Graph geometry: a line's angle is the Footstep's direction (up = toward the
-  // story's intent, down = away), and its length is the Footstep's magnitude.
-  const MAX_ANGLE = 60;
+  const OLD_EDGE = { causal: 'cause', setup_resolution: 'cause', thematic: 'casual' };
+  const OLD_STRICTNESS = { strict: 0.9, moderate: 0.6, flexible: 0.3, off: 0 };
+  // Graph geometry: 0° points right. A Footstep's line leaves the one before it at
+  // its direction (anticlockwise +, clockwise −), its length is the magnitude and
+  // its circle size the intensity.
   const PHYSICAL_WORDS =
     'tall short fat thin big small huge tiny old young elderly bald bearded beard moustache scar scarred blind lame limp limping strong heavy heavy-set wiry pale dark fair red-faced grey gray white-haired grey-haired blue-eyed one-eyed hunched giant plump skinny muscular beautiful handsome ugly wrinkled stout slender broad frail tattooed freckled curly'.split(
       ' '
@@ -40,7 +43,8 @@
       title,
       stage: null,
       plannedLength: NSMM.DEFAULT_PLANNED_LENGTH,
-      threshold: NSMM.DEFAULT_THRESHOLD,
+      tf: null, // null = automatic from the planned length
+      branchShare: NSMM.DEFAULT_BRANCH_SHARE,
       embedder: null,
       footsteps: [],
       edges: [],
@@ -58,15 +62,28 @@
   function normalize(j) {
     if (!j || !Array.isArray(j.footsteps)) return null;
     j = { ...newJourney(), ...j };
+    delete j.threshold;
     if (!Array.isArray(j.order)) j.order = j.footsteps.filter((f) => f.thread === 'main').map((f) => f.id);
     j.characters.forEach((c) => {
-      c.traits = c.traits || [];
+      c.traits = (c.traits || []).map((t) => (typeof t === 'string' ? { text: t } : t));
       c.physical = c.physical || [];
+      c.aliases = c.aliases || [];
+      if (!Number.isFinite(c.strictness)) {
+        const levels = c.traits.map((t) => OLD_STRICTNESS[t.level] ?? 0.6);
+        c.strictness = levels.length ? Math.max(...levels) : 0.6;
+      }
+      c.traits.forEach((t) => delete t.level);
     });
     j.footsteps.forEach((f) => {
       if (f.stage === undefined) f.stage = null;
       f.violations = f.violations || [];
+      if (!f.environment) f.environment = f.world_rules || [];
+      delete f.world_rules;
+      delete f.intent_signal;
+      if (f.intensity === undefined && Number.isFinite(f.plot_intensity)) f.intensity = f.plot_intensity;
+      delete f.plot_intensity;
     });
+    j.edges.forEach((e) => (e.type = OLD_EDGE[e.type] || (EDGE_TYPES[e.type] ? e.type : 'casual')));
     return j;
   }
 
@@ -177,14 +194,34 @@
     [order[i], order[j]] = [order[j], order[i]];
   }
 
-  // The main-thread moment a branch grew from.
+  // The Footstep a side-path Footstep grew from (a main one, or the previous one on its path).
   function branchRoot(f) {
-    const e = journey.edges.find((x) => x.to === f.id && fsById(x.from) && fsById(x.from).thread !== 'archived');
+    const e =
+      journey.edges.find((x) => x.to === f.id && x.type === 'temporal' && fsById(x.from) && fsById(x.from).thread !== 'archived') ||
+      journey.edges.find((x) => x.to === f.id && fsById(x.from) && fsById(x.from).thread !== 'archived');
     return e ? fsById(e.from) : null;
   }
 
+  // The first Footstep of the side path f is on.
+  function pathStart(f) {
+    let cur = f;
+    const seen = new Set();
+    while (cur && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      const up = branchRoot(cur);
+      if (!up || up.thread !== 'branch') return cur;
+      cur = up;
+    }
+    return f;
+  }
+
+  // Terminancy factor: the writer's override, else automatic from the planned length.
+  function tfValue() {
+    return Number.isFinite(journey.tf) ? journey.tf : NSMM.autoTerminancy(journey.plannedLength);
+  }
+
   function fsText(f) {
-    return [f.event, f.context, (f.subjects || []).join(', ')].filter(Boolean).join('. ');
+    return [f.event, f.context, (f.environment || []).join(', '), (f.subjects || []).join(', ')].filter(Boolean).join('. ');
   }
 
   function shortText(s, n) {
@@ -199,7 +236,8 @@
   }
 
   function character(name) {
-    return journey.characters.find((c) => c.name.toLowerCase() === String(name).toLowerCase());
+    const n = String(name).toLowerCase();
+    return journey.characters.find((c) => c.name.toLowerCase() === n) || journey.characters.find((c) => (c.aliases || []).some((a) => a.toLowerCase() === n));
   }
 
   function ensureCharacter(name) {
@@ -207,10 +245,38 @@
     if (!name) return null;
     let c = character(name);
     if (!c) {
-      c = { name, traits: [], physical: [] };
+      c = { name, traits: [], physical: [], aliases: [], strictness: 0.6 };
       journey.characters.push(c);
     }
     return c;
+  }
+
+  // One character known by two names ("the prince's wife" is Rita): fold `from`
+  // into `into`, keep the old name as an alias, and rename it in every Footstep.
+  function mergeCharacters(fromName, intoName) {
+    const into = ensureCharacter(intoName);
+    const from = journey.characters.find((c) => c.name.toLowerCase() === String(fromName).toLowerCase());
+    if (!into || !from || from === into) return false;
+    const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+    [from.name, ...(from.aliases || [])].forEach((a) => {
+      if (!same(a, into.name) && !into.aliases.some((x) => same(x, a))) into.aliases.push(a);
+    });
+    from.traits.forEach((t) => {
+      if (!into.traits.some((x) => same(x.text, t.text))) into.traits.push(t);
+    });
+    from.physical.forEach((p) => addPhysical(into, p));
+    into.strictness = Math.max(into.strictness ?? 0.6, from.strictness ?? 0.6);
+    journey.characters = journey.characters.filter((c) => c !== from);
+    journey.footsteps.forEach((f) => {
+      f.subjects = [...new Set((f.subjects || []).map((s) => (into.aliases.some((a) => same(a, s)) ? into.name : s)))];
+      (f.violations || []).forEach((v) => {
+        if (into.aliases.some((a) => same(a, v.character))) v.character = into.name;
+      });
+    });
+    journey.alerts.forEach((a) => {
+      if (a.character && into.aliases.some((x) => same(x, a.character))) a.character = into.name;
+    });
+    return true;
   }
 
   function addPhysical(c, feature) {
@@ -230,7 +296,7 @@
 
   function recurrence(c) {
     const pool = journey.footsteps.filter((f) => f.thread !== 'archived');
-    const hits = pool.filter((f) => appearsIn(f, c.name));
+    const hits = pool.filter((f) => [c.name, ...(c.aliases || [])].some((n) => appearsIn(f, n)));
     return { hits, total: pool.length, pct: pool.length ? Math.round((100 * hits.length) / pool.length) : 0 };
   }
 
@@ -245,7 +311,7 @@
   }
 
   function currentEmbedder() {
-    return LLM.hasKey() ? 'gemini' : 'local';
+    return LLM.hasEmbedKey() ? 'gemini' : 'local';
   }
 
   async function embedTexts(texts) {
@@ -254,10 +320,13 @@
   }
 
   // If the embedder changed (key added or removed), re-embed every Footstep so
-  // cosine similarity always compares vectors from the same model.
+  // cosine similarity always compares vectors from the same model. Also when any
+  // vector has the wrong size (an import or a fallback mixed the two).
   async function ensureEmbedder() {
     const want = currentEmbedder();
-    if (journey.embedder === want) return;
+    const size = want === 'gemini' ? LLM.EMBED_DIM : NSMM.localEmbedding('').length;
+    const mixed = journey.footsteps.some((f) => !f.embedding || f.embedding.length !== size);
+    if (journey.embedder === want && !mixed) return;
     if (journey.footsteps.length) {
       setStatus('Re-embedding Journey with ' + (want === 'gemini' ? 'Gemini' : 'offline') + ' embeddings…');
       const vecs = await embedTexts(journey.footsteps.map(fsText));
@@ -270,40 +339,43 @@
 
   const EXTRACT_SCHEMA = `{
   "footsteps": [{
-    "event": "one sentence: what happens (the atomic story moment)",
-    "subjects": ["character or entity names involved"],
-    "context": "where/when/circumstances",
-    "plot_intensity": 0.0-1.0,
+    "event": "the writer's own words for this Footstep, with only grammar and filler fixed (change under 5% of the words; never paraphrase or summarise)",
+    "subjects": ["canonical character or entity names involved"],
+    "context": "when and in what circumstances, if the writer said",
+    "environment": ["the place or space where it happens, if the writer said"],
+    "intensity": 0.0-1.0 (impact on the story: 0 = a quiet beat, 1 = changes everything),
     "promises": ["setups planted that the story must later pay off"],
-    "world_rules": ["new rules of the world introduced"],
-    "intent_signal": -1.0 to 1.0 (-1 = writer is exploring a what-if/tangent, 0 = neutral, +1 = converging toward climax/resolution),
-    "seeds": [{"target": "existing id like FS#003, or NEW1/NEW2 for an earlier footstep in this same list", "type": "causal|temporal|character_arc|setup_resolution|thematic"}]
+    "seeds": [{"target": "existing id like FS#003, or NEW1/NEW2 for an earlier footstep in this same list", "type": "cause|casual|character_arc", "direction": "from (the target causes this one) or to (this one causes the target)"}]
   }],
-  "place_after": "the existing main-thread id these new moments come right after in STORY time, START if they come before everything, or END if they simply continue the story",
-  "new_traits": [{"character": "name", "trait": "a lasting behavioural rule the writer stated, e.g. 'never lies'"}],
+  "place_after": "the existing main-thread id these new Footsteps come right after in STORY time, START if they come before everything, or END if they simply continue the story",
+  "aliases": [{"alias": "another name or description used for a character", "name": "that character's canonical name"}],
+  "new_traits": [{"character": "name", "trait": "one short trait, e.g. jealous, arrogant, never lies"}],
   "physical_features": [{"character": "name", "feature": "a short phrase about body, face, age, clothing or voice the writer stated, e.g. 'big, fat king'"}],
-  "violations": [{"footstep": "NEW1", "character": "name", "trait": "exact existing trait text", "severity": "soft|hard", "suggestion": "how the writer could fix or justify it"}]
+  "violations": [{"footstep": "NEW1", "character": "name", "trait": "exact existing trait text", "severity": "soft|hard", "suggestion": "how the writer could keep the character true to the trait, or justify the change"}]
 }`;
 
   function extractPrompt(transcript) {
     const recent = [
       ...mainInOrder().map((f, i) => `${i + 1}. ${f.id}: ${f.event}`),
-      ...journey.footsteps.filter((f) => f.thread === 'branch').map((f) => `   (side branch) ${f.id}: ${f.event}`),
+      ...journey.footsteps.filter((f) => f.thread === 'branch').map((f) => `   (side path) ${f.id}: ${f.event}`),
     ]
       .slice(-80)
       .join('\n');
     const people = journey.characters
       .map((c) => {
-        const traits = c.traits.filter((t) => t.level !== 'off').map((t) => `"${t.text}" (${t.level})`);
-        return `- ${c.name}${c.physical.length ? ` [looks: ${c.physical.join('; ')}]` : ''}${traits.length ? `: ${traits.join(', ')}` : ''}`;
+        const aka = c.aliases?.length ? ` (also called: ${c.aliases.join(', ')})` : '';
+        const traits = c.traits.length ? `: traits ${c.traits.map((t) => `"${t.text}"`).join(', ')}, strictness ${(c.strictness ?? 0.6).toFixed(1)}` : '';
+        return `- ${c.name}${aka}${c.physical.length ? ` [looks: ${c.physical.join('; ')}]` : ''}${traits}`;
       })
       .join('\n');
-    return `You are the extraction layer of Kahyo, a voice-first storytelling system based on the Narrative Storyline Mapping Model (NSMM).
-A writer just spoke a fragment of their story out loud. Split it into Footsteps: atomic story moments, each one meaningful advancement. Usually 1-4 per fragment. Ignore filler ("um", "so basically").
-Writers speak out of order. Decide where the new moments belong in the story's timeline and set place_after. Use END unless the writer signals otherwise (e.g. "before the king...", "earlier,", "at the start", "back in step 2") or the content clearly happens earlier. Use the story so far to understand pronouns and references.
-Link each new Footstep to earlier ones with typed seeds only when there is a real causal, character-arc, setup-resolution or thematic relationship. Story order is tracked separately, so do not add temporal seeds.
-Check every new Footstep against the character traits below. Report a violation only when a character clearly acts against a trait. Use "hard" for strict traits.
-Only report new_traits the writer explicitly states about a character's lasting nature, and physical_features the writer states about how a character looks or sounds.
+    return `You are the extraction layer of Kahyo, a voice-first storytelling system based on the Wordwalk Model, a Narrative Storyline Mapping Model (NSMM), and its ThoughtSense Engine.
+A writer just spoke a fragment of their story out loud. Split it into Footsteps: atomic story steps, each one meaningful advancement. Usually 1-4 per fragment.
+The event is the writer's own words. Keep their wording; fix only grammar and drop filler ("um", "so basically"). Do not summarise, shorten or rephrase.
+Writers speak out of order. Decide where the new Footsteps belong in the story's timeline and set place_after. Use END unless the writer signals otherwise (e.g. "before the king...", "earlier,", "at the start", "back in step 2") or the content clearly happens earlier. Use the story so far to understand pronouns and references.
+Characters: use one canonical name per person. When the writer reveals that a description or second name is someone already known (e.g. "the prince's wife" is Rita, or Arjun's father turns out to be Krishna), add it to aliases and use the canonical name in subjects.
+Link each new Footstep to earlier ones only for a real relationship: cause (one makes the other happen; if one changed, the other would too), casual (a looser connection), or character_arc (the same character's change). Story order is tracked separately.
+Check every new Footstep against the character traits below. Strictness goes from 0 (the character may evolve freely) to 1 (must never break a trait). Report a violation only when a character acts against a trait by more than their strictness allows. Use "hard" when strictness is 0.8 or more.
+Only report new_traits the writer explicitly states about a character's lasting nature, as short list items (jealous, arrogant, loyal to the king), and physical_features the writer states about how a character looks or sounds.
 
 Journey: ${journey.title}
 Main thread in story order (oldest first):
@@ -329,20 +401,17 @@ Writer's spoken fragment:
       footsteps: sentences.map((s) => {
         const caps = (s.slice(1).match(/\b[A-Z][a-z]+\b/g) || []).filter((w) => !skip.has(w));
         const subjects = [...new Set([...known.filter((k) => s.includes(k)), ...caps])].slice(0, 4);
-        const exploring = /\b(what if|maybe|just exploring|thinking out loud|tangent|perhaps)\b/i.test(s);
-        const converging = /\b(finally|climax|at last|in the end|realizes|realises|ending)\b/i.test(s);
         return {
           event: s.replace(/^(so|and|then|okay|um|uh)[,\s]+/i, ''),
           subjects,
           context: '',
-          plot_intensity: 0.5,
+          environment: [],
           promises: [],
-          world_rules: [],
-          intent_signal: exploring ? -1 : converging ? 1 : 0,
           seeds: [],
         };
       }),
       place_after: 'END',
+      aliases: [],
       new_traits: [],
       physical_features: known.flatMap((name) => offlinePhysical(transcript, name).map((w) => ({ character: name, feature: w }))),
       violations: [],
@@ -357,18 +426,25 @@ Writer's spoken fragment:
     const extracted = preExtracted || (LLM.hasKey() ? await LLM.generateJSON(extractPrompt(transcript), EXTRACT_SCHEMA) : offlineExtract(transcript));
     const items = (extracted.footsteps || []).filter((f) => f && f.event);
     if (!items.length) {
-      setStatus('No story moments found in that fragment. Try saying what happens.', 'warn');
+      setStatus('No Footsteps found in that fragment. Try saying what happens.', 'warn');
       return;
     }
+    const reliable = LLM.hasKey() || Boolean(preExtracted);
 
-    (extracted.new_traits || []).forEach((t) => {
-      const c = ensureCharacter(t.character);
-      if (c && t.trait && !c.traits.some((x) => x.text.toLowerCase() === t.trait.toLowerCase())) {
-        c.traits.push({ text: t.trait, level: 'moderate' });
+    (extracted.aliases || []).forEach((a) => {
+      if (!a?.alias || !a?.name) return;
+      if (character(a.alias) && character(a.alias) !== character(a.name)) mergeCharacters(character(a.alias).name, a.name);
+      else {
+        const c = ensureCharacter(a.name);
+        if (c && a.alias.toLowerCase() !== c.name.toLowerCase() && !c.aliases.some((x) => x.toLowerCase() === a.alias.toLowerCase())) c.aliases.push(String(a.alias));
       }
     });
+    (extracted.new_traits || []).forEach((t) => {
+      const c = ensureCharacter(t.character);
+      if (c && t.trait && !c.traits.some((x) => x.text.toLowerCase() === t.trait.toLowerCase())) c.traits.push({ text: String(t.trait) });
+    });
     (extracted.physical_features || []).forEach((p) => {
-      const c = LLM.hasKey() || preExtracted ? ensureCharacter(p.character) : character(p.character);
+      const c = reliable ? ensureCharacter(p.character) : character(p.character);
       addPhysical(c, p.feature);
     });
 
@@ -380,76 +456,50 @@ Writer's spoken fragment:
       if (m) return newIds[Number(m[1]) - 1];
       return fsById(target) ? target : null;
     };
+    const canonical = (name) => character(name)?.name || String(name);
 
     const vecs = await embedTexts(items.map(fsText));
-    // Where the new moments go: the writer's pick, else the model's, else the end.
+    // Where the new Footsteps go: the writer's pick, else the model's, else the end.
+    // Picking a side-path Footstep continues that side path.
     let anchor = placeAfter && placeAfter !== 'AUTO' ? placeAfter : String(extracted.place_after || 'END').trim();
-    if (anchor !== 'START' && !storyOrder().includes(anchor)) anchor = 'END';
+    const onBranch = fsById(anchor)?.thread === 'branch';
+    if (!onBranch && anchor !== 'START' && !storyOrder().includes(anchor)) anchor = 'END';
 
     items.forEach((raw, i) => {
       const fs = {
         id: newIds[i],
         event: String(raw.event),
-        subjects: (raw.subjects || []).map(String),
+        subjects: [...new Set((raw.subjects || []).map(canonical))],
         context: String(raw.context || ''),
-        plot_intensity: Number(raw.plot_intensity ?? 0.5),
+        environment: (raw.environment || raw.world_rules || []).map(String).filter(Boolean),
         promises: (raw.promises || []).map(String),
-        world_rules: (raw.world_rules || []).map(String),
-        intent_signal: Number(raw.intent_signal ?? 0),
         stage: null,
         created_at: Date.now(),
         transcript,
         embedding: vecs[i],
-        thread: 'main',
+        thread: onBranch ? 'branch' : 'main',
         violations: [],
       };
-      if (LLM.hasKey() || preExtracted) fs.subjects.forEach(ensureCharacter);
-
-      const prior = journey.footsteps.filter((f) => f.thread === 'main');
-      fs.metrics = NSMM.scoreFootstep(fs, prior, fs.stage, journey.threshold);
+      const ai = Number(raw.intensity ?? raw.plot_intensity);
+      if (reliable && Number.isFinite(ai)) fs.intensity = clamp(ai, 0, 1);
+      if (reliable) fs.subjects.forEach(ensureCharacter);
       journey.footsteps.push(fs);
 
-      const seeds = (raw.seeds || [])
-        .map((s) => ({ from: resolve(s.target), type: EDGE_TYPES[s.type] ? s.type : 'causal' }))
-        .filter((s) => s.from && s.from !== fs.id && s.type !== 'temporal');
-      seeds.forEach((s) => journey.edges.push({ from: s.from, to: fs.id, type: s.type }));
+      (raw.seeds || []).forEach((sd) => {
+        const other = resolve(sd.target);
+        if (!other || other === fs.id) return;
+        const type = OLD_EDGE[sd.type] || (EDGE_TYPES[sd.type] && sd.type !== 'temporal' ? sd.type : null);
+        if (!type) return;
+        const forward = String(sd.direction || 'from').toLowerCase() === 'to';
+        journey.edges.push(forward ? { from: fs.id, to: other, type } : { from: other, to: fs.id, type });
+      });
 
-      // Pruning waits until the Journey has a direction to measure against: not
-      // before four main moments, and offline (weak embeddings) only when the
-      // writer signals a what-if. An explicit what-if can branch any time.
-      const mainCount = storyOrder().length;
-      const reliable = LLM.hasKey() || Boolean(preExtracted);
-      const canBranch = (fs.intent_signal < 0 && mainCount >= 1) || (reliable && mainCount >= 4);
-      fs.metrics.is_branch_candidate = fs.metrics.is_branch_candidate && canBranch;
-
-      if (fs.metrics.is_branch_candidate) {
-        fs.thread = 'branch';
-        // A branch hangs off the moment it grew from.
-        const root = anchor === 'END' ? storyOrder()[storyOrder().length - 1] : anchor === 'START' ? storyOrder()[0] : anchor;
-        if (!seeds.length && root) journey.edges.push({ from: root, to: fs.id, type: 'temporal' });
-        journey.alerts.unshift({
-          id: 'a' + uid(),
-          kind: 'terminancy',
-          fsId: fs.id,
-          text: `${fs.id} wanders away from where your story is heading, so Kahyo moved it to a side path.`,
-          maths: `terminancy ${fs.metrics.terminancy.toFixed(2)} > threshold ${journey.threshold}`,
-          open: true,
-        });
+      if (onBranch) {
+        journey.edges.push({ from: anchor, to: fs.id, type: 'temporal' });
       } else {
         placeInOrder(fs.id, anchor);
-        anchor = fs.id;
-        if (fs.metrics.contradiction_review) {
-          journey.alerts.unshift({
-            id: 'a' + uid(),
-            kind: 'contradiction',
-            fsId: fs.id,
-            text: `${fs.id} seems to point against what came before. Is that a twist, or a slip?`,
-            maths: `angle ${fs.metrics.angle.toFixed(0)}° ≥ 150°`,
-            open: true,
-          });
-        }
       }
-      flagIfHeavy(fs);
+      anchor = fs.id;
     });
 
     (extracted.violations || []).forEach((v) => {
@@ -457,35 +507,94 @@ Writer's spoken fragment:
       const fs = fsById(id);
       const c = character(v.character);
       const trait = c?.traits.find((t) => t.text.toLowerCase() === String(v.trait).toLowerCase()) || c?.traits[0];
-      if (!fs || !trait || trait.level === 'off') return;
-      const severity = trait.level === 'strict' ? 'hard' : v.severity === 'hard' ? 'hard' : 'soft';
+      if (!fs || !trait || (c.strictness ?? 0.6) <= 0) return;
+      const severity = (c.strictness ?? 0.6) >= 0.8 || v.severity === 'hard' ? 'hard' : 'soft';
       fs.violations.push({ character: c.name, trait: trait.text, severity, suggestion: v.suggestion || '' });
-      journey.alerts.unshift({
-        id: 'a' + uid(),
-        kind: 'trait',
-        fsId: fs.id,
-        character: c.name,
-        trait: trait.text,
-        severity,
-        text: `In ${fs.id}, ${c.name} acts against "${trait.text}".`,
-        suggestion: v.suggestion || '',
-        open: true,
-      });
+      addNote({ kind: 'trait', fsId: fs.id, character: c.name, trait: trait.text, severity, text: `In ${fs.id}, ${c.name} acts against "${trait.text}".`, suggestion: v.suggestion || '' });
     });
 
     await relabelStages(!preExtracted);
+    syncNotes(newIds);
     checkDrift();
     save();
     renderAll({ fit: true });
     selectFootstep(newIds[newIds.length - 1]);
-    // Quiet notes: a dot on the moment and a count on the Notes tab, no interruption.
+    // Quiet notes: a dot on the Footstep and a count on the Notes tab, no interruption.
     const flagged = journey.alerts.filter((a) => a.open && newIds.includes(a.fsId)).length;
-    setStatus(`Added ${items.length} moment${items.length > 1 ? 's' : ''}.${flagged ? ` Kahyo left ${flagged} note${flagged > 1 ? 's' : ''} in the margin.` : ''}`, 'ok');
+    setStatus(`Added ${items.length} Footstep${items.length > 1 ? 's' : ''}.${flagged ? ` Kahyo left ${flagged} note${flagged > 1 ? 's' : ''} in the margin.` : ''}`, 'ok');
   }
 
-  // Story drift: placeholder rule until the math study defines it. Of the last
-  // six Footsteps written, if half or more are branches or past the
-  // Terminancy threshold, the story is wandering from its main line.
+  // ---------- notes ----------
+
+  // A note stays in the list until the writer clears it. The same flag on the
+  // same Footstep is noted once, even after it is cleared.
+  function addNote(n) {
+    if (journey.alerts.some((a) => a.kind === n.kind && a.fsId === n.fsId && (n.kind !== 'trait' || (a.character === n.character && a.trait === n.trait)))) return false;
+    journey.alerts.unshift({ id: 'a' + uid(), open: true, created: Date.now(), ...n });
+    return true;
+  }
+
+  const deg = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x).toFixed(0)}°`;
+
+  // Turns each Footstep's flags into notes. Main thread: direction (wandering /
+  // off course) and size (Jump / Crawl). Side paths: drifting and terminancy.
+  function syncNotes(ids) {
+    const tf = tfValue();
+    journey.footsteps
+      .filter((f) => f.metrics && f.thread !== 'archived' && (!ids || ids.includes(f.id)))
+      .forEach((f) => {
+        const m = f.metrics;
+        if (f.thread === 'main') {
+          if (m.dirStatus === 'off')
+            addNote({
+              kind: 'off',
+              fsId: f.id,
+              text: `${f.id} turns ${deg(m.direction)} from where your story is heading. That is past the ${m.limit.toFixed(0)}° limit, so it is off course. Branch it into a side path?`,
+              maths: `direction ${deg(m.direction)} · limit ${m.limit.toFixed(0)}°`,
+            });
+          else if (m.dirStatus === 'wander')
+            addNote({
+              kind: 'wander',
+              fsId: f.id,
+              text: `${f.id} wanders slightly (${deg(m.direction)}). It would be off course past ${m.limit.toFixed(0)}°.`,
+              maths: `direction ${deg(m.direction)} · limit ${m.limit.toFixed(0)}°`,
+            });
+          if (m.sizeFlag === 'jump')
+            addNote({
+              kind: 'jump',
+              fsId: f.id,
+              text: `${f.id} is a Jump: a lot happens at once (${m.magnitude} against a usual ${m.avgMagnitude.toFixed(0)}). Split it, or keep it as one big step?`,
+              maths: `magnitude ${m.magnitude} · usual ${m.avgMagnitude.toFixed(0)}`,
+            });
+          if (m.sizeFlag === 'crawl')
+            addNote({
+              kind: 'crawl',
+              fsId: f.id,
+              text: `${f.id} is a Crawl: much less happens than usual (${m.magnitude} against ${m.avgMagnitude.toFixed(0)}). Add to it or fold it into a neighbour?`,
+              maths: `magnitude ${m.magnitude} · usual ${m.avgMagnitude.toFixed(0)}`,
+            });
+        } else if (f.thread === 'branch' && !pathStart(f).ended) {
+          const bf = m.iv.length;
+          if (m.branch === 'terminate')
+            addNote({
+              kind: 'terminate',
+              fsId: f.id,
+              text: `The side path at ${f.id} has wandered so far it will be hard to bring back. Let it end here, or change its steps to lean back toward the main story.`,
+              maths: `branching factor ${bf.toFixed(2)} · terminancy ${tf.toFixed(2)}`,
+            });
+          else if (m.branch === 'drifting')
+            addNote({
+              kind: 'drifting',
+              fsId: f.id,
+              text: `The side path at ${f.id} is drifting further from where it branched.`,
+              maths: `branching factor ${bf.toFixed(2)} · terminancy ${tf.toFixed(2)}`,
+            });
+        }
+      });
+  }
+
+  // Story drift: of the last six Footsteps written, if half or more are side
+  // paths or off course, the story is wandering from its main line.
   const DRIFT_WINDOW = 6;
   const DRIFT_SHARE = 0.5;
   function recentOffCourse() {
@@ -493,58 +602,48 @@ Writer's spoken fragment:
       .filter((f) => f.thread !== 'archived')
       .sort((a, b) => a.created_at - b.created_at)
       .slice(-DRIFT_WINDOW);
-    const off = recent.filter((f) => f.thread === 'branch' || (f.metrics?.terminancy ?? 0) > journey.threshold);
-    return { recent, off, drifting: recent.length >= 4 && off.length >= 3 && off.length / recent.length >= DRIFT_SHARE };
+    const off = recent.filter((f) => f.thread === 'branch' || f.metrics?.dirStatus === 'off');
+    const wander = recent.filter((f) => f.thread === 'main' && f.metrics?.dirStatus === 'wander');
+    return { recent, off, wander, drifting: recent.length >= 4 && off.length >= 3 && off.length / recent.length >= DRIFT_SHARE };
   }
 
   // One signal for the writer instead of six numbers.
   function storyHealth() {
-    const { recent, off, drifting } = recentOffCourse();
-    if (recent.length < 2) return { level: 'quiet', label: 'Just starting' };
-    if (drifting) return { level: 'drift', label: 'Drifting' };
-    if (off.length >= 2) return { level: 'wander', label: 'Wandering a little' };
-    return { level: 'ok', label: 'On course' };
+    const { recent, off, wander, drifting } = recentOffCourse();
+    if (recent.length < 3) return { level: 'quiet', label: 'Just starting', why: 'Kahyo judges direction from the 4th Footstep on.' };
+    if (drifting) return { level: 'drift', label: 'Drifting', why: `${off.length} of your last ${recent.length} Footsteps are side paths or off course.` };
+    if (off.length + wander.length >= 2) return { level: 'wander', label: 'Wandering a little', why: `${off.length + wander.length} of your last ${recent.length} Footsteps wander or branch off.` };
+    return { level: 'ok', label: 'On course', why: `Your last ${recent.length} Footsteps follow the main story.` };
   }
 
+  // The drift note is raised once per drift; "It's on purpose" pauses it until
+  // more Footsteps are written.
   function checkDrift() {
     const { recent, off, drifting } = recentOffCourse();
-    const open = journey.alerts.find((a) => a.open && a.kind === 'drift');
+    if (!drifting) return;
     const count = journey.footsteps.length;
-    if (!drifting) {
-      if (open) open.open = false;
-      return;
-    }
-    if (journey.driftDismissedAt === count) return;
-    const text = `${off.length} of your last ${recent.length} moments wander away from the main story (${off.map((f) => f.id).join(', ')}). Is that on purpose? If not, bring the next idea back to the main line.`;
-    if (open) open.text = text;
-    const maths = `${off.length}/${recent.length} recent moments are branches or past threshold ${journey.threshold}`;
-    if (open) open.maths = maths;
-    else journey.alerts.unshift({ id: 'a' + uid(), kind: 'drift', fsId: off[off.length - 1].id, text, maths, open: true });
-  }
-
-  // A Footstep with too much in it is probably two moments.
-  function flagIfHeavy(fs) {
-    if (NSMM.dataAmount(fs) <= NSMM.SPLIT_AT) return;
-    if (journey.alerts.some((a) => a.open && a.kind === 'heavy' && a.fsId === fs.id)) return;
+    if (journey.driftDismissedAt && count - journey.driftDismissedAt < DRIFT_WINDOW) return;
+    if (journey.alerts.some((a) => a.open && a.kind === 'drift')) return;
     journey.alerts.unshift({
       id: 'a' + uid(),
-      kind: 'heavy',
-      fsId: fs.id,
-      text: `${fs.id} holds a lot. It may be two moments in one.`,
-      maths: `data ${NSMM.dataAmount(fs)} > ${NSMM.SPLIT_AT}`,
+      kind: 'drift',
+      fsId: off[off.length - 1].id,
+      text: `${off.length} of your last ${recent.length} Footsteps wander away from the main story (${off.map((f) => f.id).join(', ')}). Is that on purpose? If not, bring the next idea back to the main line.`,
+      maths: `${off.length} of ${recent.length} recent Footsteps`,
       open: true,
+      created: Date.now(),
     });
   }
 
   // ---------- stages ----------
 
-  // No stage labels until the Journey has 12 main Footsteps. Then the AI reads
-  // the whole story and labels each moment (every 3 new Footsteps, to save the
+  // No stage labels until 20% of the planned Footsteps exist. Then the AI reads
+  // the whole story and labels each Footstep (every 3 new Footsteps, to save the
   // free quota), with a position-based fallback offline.
   async function relabelStages(allowAI) {
     const main = mainInOrder();
     const n = main.length;
-    if (n < NSMM.STAGE_LABEL_AFTER) {
+    if (n < NSMM.stageLabelAfter(journey.plannedLength)) {
       journey.footsteps.forEach((f) => (f.stage = null));
       journey.stage = null;
       journey.aiStaged = 0;
@@ -563,7 +662,7 @@ Writer's spoken fragment:
     }
     if (!labels) {
       if (journey.aiStaged) {
-        // Keep the AI's labels; a new moment takes the stage of the one before it.
+        // Keep the AI's labels; a new Footstep takes the stage of the one before it.
         let prev = NSMM.STAGES[0];
         labels = main.map((f) => (prev = f.stage || prev));
       } else {
@@ -584,7 +683,7 @@ Writer's spoken fragment:
 
   async function aiStages(main) {
     const res = await LLM.generateJSON(
-      `You label the stages of a story being written in Kahyo (NSMM Journey Mapping). The story is unfinished: ${main.length} of about ${journey.plannedLength} planned Footsteps are written.
+      `You label the stages of a story being written in Kahyo (Wordwalk Journey Mapping). The story is unfinished: ${main.length} of about ${journey.plannedLength} planned Footsteps are written.
 Stages, in order:
 - Origin: the world and characters before the story moves.
 - Pandiculation: the story stretches open: the inciting event and new threads.
@@ -602,13 +701,17 @@ ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
     return main.map((f) => (prev = NSMM.STAGES.includes(byId[f.id]) ? byId[f.id] : prev));
   }
 
-  // Re-score every Footstep in creation order (after a threshold change or edit).
+  // Re-score every Footstep in writing order, each against the main thread as
+  // it stood before it. A side-path Footstep's intent vector is measured from
+  // the direction its path started at.
   function rescoreAll() {
     const prior = [];
+    const tf = tfValue();
     journey.footsteps.forEach((f) => {
-      const keepBranch = f.metrics?.is_branch_candidate;
-      f.metrics = NSMM.scoreFootstep(f, prior, f.stage, journey.threshold);
-      if (f.thread !== 'branch') f.metrics.is_branch_candidate = f.metrics.is_branch_candidate && keepBranch;
+      const start = f.thread === 'branch' ? pathStart(f) : null;
+      const from = start && start !== f ? start.metrics : null;
+      f.metrics = NSMM.scoreFootstep(f, prior, { tf, stage: f.stage, rootDirection: from?.direction, rootMagnitude: from?.magnitude });
+      if (f.thread === 'branch') f.metrics.branch = NSMM.branchState(f.metrics.iv.length, tf, journey.branchShare);
       if (f.thread === 'main') prior.push(f);
     });
   }
@@ -634,10 +737,10 @@ ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
     if (!f) return;
     let parts = null;
     if (LLM.hasKey()) {
-      setStatus('Splitting ' + id + ' into two moments…');
+      setStatus('Splitting ' + id + ' into two Footsteps…');
       const r = await LLM.generateJSON(
-        `Split this story moment into exactly two smaller, consecutive moments. Keep the writer's facts; do not add events.\nEvent: ${f.event}\nContext: ${f.context}\nSubjects: ${(f.subjects || []).join(', ')}\nPromises: ${(f.promises || []).join('; ')}\nWorld rules: ${(f.world_rules || []).join('; ')}`,
-        '{"footsteps":[{"event":"","subjects":[""],"context":"","promises":[""],"world_rules":[""]},{"event":"","subjects":[""],"context":"","promises":[""],"world_rules":[""]}]}'
+        `Split this story Footstep into exactly two smaller, consecutive Footsteps. Keep the writer's own words and facts; do not add events. Rate each one's intensity (impact on the story) from 0 to 1.\nEvent: ${f.event}\nContext: ${f.context}\nSubjects: ${(f.subjects || []).join(', ')}\nPromises: ${(f.promises || []).join('; ')}\nEnvironment: ${(f.environment || []).join('; ')}`,
+        '{"footsteps":[{"event":"","subjects":[""],"context":"","promises":[""],"environment":[""],"intensity":0.5},{"event":"","subjects":[""],"context":"","promises":[""],"environment":[""],"intensity":0.5}]}'
       );
       if (Array.isArray(r.footsteps) && r.footsteps.length >= 2) parts = r.footsteps.slice(0, 2);
     }
@@ -658,8 +761,8 @@ ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
       if (!a) return setStatus('Kahyo could not find a natural place to split this one offline. Edit the event text instead.', 'warn');
       const who = (s) => (f.subjects || []).filter((x) => s.toLowerCase().includes(x.toLowerCase().split(/\s+/).pop()));
       parts = [
-        { event: a, subjects: who(a).length ? who(a) : f.subjects, context: f.context, promises: [], world_rules: f.world_rules },
-        { event: b[0].toUpperCase() + b.slice(1), subjects: who(b).length ? who(b) : f.subjects, context: f.context, promises: f.promises, world_rules: [] },
+        { event: a, subjects: who(a).length ? who(a) : f.subjects, context: f.context, promises: [], environment: f.environment },
+        { event: b[0].toUpperCase() + b.slice(1), subjects: who(b).length ? who(b) : f.subjects, context: f.context, promises: f.promises, environment: f.environment },
       ];
     }
     const g = {
@@ -674,7 +777,9 @@ ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
       x.subjects = (p.subjects || []).filter(Boolean).map(String);
       x.context = String(p.context ?? x.context);
       x.promises = (p.promises || []).filter(Boolean).map(String);
-      x.world_rules = (p.world_rules || []).filter(Boolean).map(String);
+      x.environment = (p.environment || []).filter(Boolean).map(String);
+      if (Number.isFinite(Number(p.intensity)) && p.intensity !== undefined) x.intensity = clamp(Number(p.intensity), 0, 1);
+      else delete x.intensity;
     });
     journey.footsteps.splice(journey.footsteps.indexOf(f) + 1, 0, g);
     journey.edges.filter((e) => e.from === f.id).forEach((e) => (e.from = g.id));
@@ -682,9 +787,9 @@ ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
     else journey.edges.push({ from: f.id, to: g.id, type: 'temporal' });
     await reembed(f);
     await reembed(g);
-    journey.alerts.filter((a) => a.kind === 'heavy' && a.fsId === f.id).forEach((a) => (a.open = false));
+    journey.alerts.filter((a) => (a.kind === 'jump' || a.kind === 'heavy') && a.fsId === f.id).forEach((a) => ((a.open = false), (a.resolution = 'split')));
     await relabelStages(false);
-    [f, g].forEach(flagIfHeavy);
+    syncNotes([g.id]);
     save();
     renderAll({ fit: true });
     selectFootstep(f.id);
@@ -716,25 +821,83 @@ ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
 
   // ---------- alert actions ----------
 
+  // Move a main Footstep onto a side path that leaves the Footstep before it.
+  function makeBranch(fs) {
+    if (fs.thread === 'branch') return;
+    const order = storyOrder();
+    const i = order.indexOf(fs.id);
+    const from = i > 0 ? order[i - 1] : order.find((id) => id !== fs.id);
+    fs.thread = 'branch';
+    storyOrder();
+    if (from && !journey.edges.some((e) => e.to === fs.id && e.type === 'temporal')) journey.edges.push({ from, to: fs.id, type: 'temporal' });
+  }
+
+  // Bring a side-path Footstep back into the main story, right after where it branched.
+  function makeMain(fs) {
+    const root = branchRoot(fs);
+    journey.edges = journey.edges.filter((e) => !(e.to === fs.id && e.type === 'temporal'));
+    fs.thread = 'main';
+    placeInOrder(fs.id, root && storyOrder().includes(root.id) ? root.id : 'END');
+  }
+
+  // Remold: rewrite the Footstep minimally so the character stays true to the trait.
+  async function remold(a) {
+    const fs = fsById(a.fsId);
+    const c = character(a.character);
+    if (!fs || !c) return;
+    if (!LLM.hasKey()) return setStatus('Remolding needs an AI key. Edit the event yourself, or loosen the character.', 'warn');
+    setStatus(`Remolding ${fs.id} so ${c.name} stays true to "${a.trait}"…`);
+    const r = await LLM.generateJSON(
+      `Rewrite this story Footstep as little as possible so that ${c.name} no longer acts against the trait "${a.trait}". Keep the writer's words, other events and every other character as they are.\nFootstep: ${fs.event}${a.suggestion ? `\nHint: ${a.suggestion}` : ''}`,
+      '{"event":"the rewritten Footstep"}'
+    );
+    if (!r.event) throw new Error('The AI did not return a rewrite. Try again.');
+    fs.event = String(r.event);
+    fs.violations = fs.violations.filter((v) => !(v.character === c.name && v.trait === a.trait));
+    await reembed(fs);
+    rescoreAll();
+    a.open = false;
+    a.resolution = 'remold';
+    save();
+    renderAll();
+    selectFootstep(fs.id);
+    setStatus(`Remolded ${fs.id}.`, 'ok');
+  }
+
   function resolveAlert(alertId, action) {
     const a = journey.alerts.find((x) => x.id === alertId);
     if (!a) return;
     const fs = fsById(a.fsId);
     if (action === 'split' && fs) return run(() => splitFootstep(fs.id));
-    if (action === 'keep' && fs) {
-      fs.thread = 'main';
-      const from = journey.edges.find((e) => e.to === fs.id && storyOrder().includes(e.from));
-      placeInOrder(fs.id, from ? from.from : 'END');
-    }
+    if (action === 'remold') return run(() => remold(a));
+    if (action === 'change' && fs) return selectFootstep(fs.id);
+    if (action === 'branch' && fs) makeBranch(fs);
+    if (action === 'keep' && fs && fs.thread === 'branch') makeMain(fs);
     if (action === 'archive' && fs) fs.thread = 'archived';
+    if (action === 'end' && fs) pathStart(fs).ended = fs.id;
     if (action === 'dismiss') journey.driftDismissedAt = journey.footsteps.length;
     if (action === 'relax') {
-      const t = character(a.character)?.traits.find((x) => x.text === a.trait);
-      if (t) t.level = 'flexible';
+      const c = character(a.character);
+      if (c) c.strictness = Math.max(0, Math.round(((c.strictness ?? 0.6) - 0.3) * 10) / 10);
     }
     if (action === 'remove' && fs) removeFootstep(fs.id);
     a.open = false;
     a.resolution = action;
+    const rethread = ['branch', 'keep', 'archive', 'remove'].includes(action);
+    (rethread
+      ? run(async () => {
+          await relabelStages(false);
+          syncNotes();
+        })
+      : Promise.resolve()
+    ).then(() => {
+      save();
+      renderAll();
+    });
+  }
+
+  function clearNotes() {
+    journey.alerts.filter((a) => a.open).forEach((a) => ((a.open = false), (a.resolution = 'cleared')));
     save();
     renderAll();
   }
@@ -753,38 +916,38 @@ ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
         groups[groups.length - 1].items.push(`${i + 1}. **${f.event}**${f.context ? ` (${f.context})` : ''}`);
       });
       journey.draft =
-        `# ${journey.title}\n\n_Helper outline from your Footsteps. Add a free Gemini key in Settings for a prose scaffold._\n\n` +
+        `# ${journey.title}\n\n_Helper outline from your Footsteps. Add an AI key in Settings for a prose scaffold._\n\n` +
         groups.map((g) => `## ${g.key}\n\n${g.items.join('\n')}`).join('\n\n') +
         (journey.characters.length ? `\n\n## Characters\n\n${journey.characters.map((c) => `- **${c.name}**${c.physical.length ? `: ${c.physical.join(', ')}` : ''}`).join('\n')}` : '') +
         (branches.length ? `\n\n## Side paths you explored\n\n${branches.map((f) => `- ${f.event}`).join('\n')}` : '');
     } else {
       setStatus('Building a helper draft from every Footstep…');
       const people = journey.characters
-        .map((c) => `${c.name}${c.physical.length ? ` (looks: ${c.physical.join(', ')})` : ''}${c.traits.length ? `; traits: ${c.traits.filter((t) => t.level !== 'off').map((t) => t.text).join(', ')}` : ''}`)
+        .map((c) => `${c.name}${c.aliases?.length ? ` (also called ${c.aliases.join(', ')})` : ''}${c.physical.length ? ` (looks: ${c.physical.join(', ')})` : ''}${c.traits.length ? `; traits: ${c.traits.map((t) => t.text).join(', ')}` : ''}`)
         .join('\n');
       // Grounded on purpose: the draft may only use what the writer said.
       // Anything missing becomes a [question] for the writer, never invented.
       const raw = await LLM.generateText(
-        `You help a writer; you never replace them. Turn the story moments below into a helper draft of "${journey.title}".
+        `You help a writer; you never replace them. Turn the story Footsteps below into a helper draft of "${journey.title}".
 
 STRICT RULES:
-- Use ONLY the facts in the moments, characters and context below. Do not invent any new character, place, object, event, backstory, motive, dialogue or description.
+- Use ONLY the facts in the Footsteps, characters and context below. Do not invent any new character, place, object, event, backstory, motive, dialogue or description.
 - If a scene needs a detail the writer has not given, write a short question in brackets for the writer instead, e.g. [What does the king build?]. Never fill it in yourself.
-- One short paragraph per moment, 1 to 3 sentences, about as long as the moment itself. Do not pad.
-- Start each paragraph with the moment number in bold, e.g. **3.** Keep the moments in this order.
+- One short paragraph per Footstep, 1 to 3 sentences, about as long as the Footstep itself. Keep the writer's own wording where you can. Do not pad.
+- Start each paragraph with the Footstep number in bold, e.g. **3.** Keep the Footsteps in this order.
 - Group the paragraphs under "## <stage>" headings when a stage is given.
 - No word counts, no notes about length, no commentary.
-- End with "## Open threads": the promises below that later moments do not pay off, one per line. Then "## Side paths": the side-path moments, one per line, if there are any.
+- End with "## Open threads": the promises below that later Footsteps do not pay off, one per line. Then "## Side paths": the side-path Footsteps, one per line, if there are any.
 
 Characters:
 ${people || '(none)'}
 
 Main story, in order:
-${main.map((f, i) => `${i + 1}. [${f.stage || 'unstaged'}] ${f.event}${f.context ? ` (${f.context})` : ''}${f.subjects?.length ? ` | who: ${f.subjects.join(', ')}` : ''}${f.promises?.length ? ` | promises: ${f.promises.join('; ')}` : ''}`).join('\n')}
+${main.map((f, i) => `${i + 1}. [${f.stage || 'unstaged'}] ${f.event}${f.context ? ` (${f.context})` : ''}${f.environment?.length ? ` | where: ${f.environment.join('; ')}` : ''}${f.subjects?.length ? ` | who: ${f.subjects.join(', ')}` : ''}${f.promises?.length ? ` | promises: ${f.promises.join('; ')}` : ''}`).join('\n')}
 
 Side paths (branches, not in the main story):
 ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
-        { temperature: 0.2, thinkingConfig: { thinkingLevel: 'low' } }
+        { temperature: 0.2 }
       );
       journey.draft = raw.replace(/\s*\(\s*\d+\s*words?\s*\)/gi, '');
     }
@@ -817,13 +980,14 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
         const branches = j.footsteps.filter((f) => f.thread === 'branch').length;
         const open = j.alerts.filter((a) => a.open).length;
         const pct = Math.min(100, Math.round((100 * main) / (j.plannedLength || 60)));
-        const stage = main >= NSMM.STAGE_LABEL_AFTER && j.stage ? j.stage : `Stages after ${NSMM.STAGE_LABEL_AFTER} Footsteps`;
+        const after = NSMM.stageLabelAfter(j.plannedLength);
+        const stage = main >= after && j.stage ? j.stage : `Stages after ${after} Footsteps`;
         return `<article class="jcard">
           <a class="jcard-main" href="#/j/${esc(j.id)}">
             <h3><img src="assets/kahyo-mark-256.png" alt="" />${esc(j.title)}</h3>
             <p class="muted small">${esc(stage)}</p>
             <div class="progress" title="${main} of about ${j.plannedLength} planned Footsteps"><i style="width:${pct}%"></i></div>
-            <p class="small">${main} / ~${j.plannedLength} Footsteps · ${branches} branch${branches === 1 ? '' : 'es'}${open ? ` · <span class="warn-text">${open} alert${open > 1 ? 's' : ''}</span>` : ''}</p>
+            <p class="small">${main} / ~${j.plannedLength} Footsteps · ${branches} side path${branches === 1 ? '' : 's'}${open ? ` · <span class="warn-text">${open} note${open > 1 ? 's' : ''}</span>` : ''}</p>
             <p class="muted small">${esc(j.characters.map((c) => c.name).slice(0, 4).join(', ') || 'No characters yet')}</p>
           </a>
           <div class="jcard-foot"><span class="muted small">Edited ${timeAgo(j.updated)}</span><button class="ghost small" data-del-journey="${esc(j.id)}">Delete</button></div>
@@ -876,7 +1040,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     const S = window.KAHYO_SAMPLE;
     journey = newJourney(S.title);
     journey.plannedLength = S.plannedLength || 16;
-    journey.characters = JSON.parse(JSON.stringify(S.characters));
+    journey.characters = normalize({ ...journey, characters: JSON.parse(JSON.stringify(S.characters)) }).characters;
     selectedId = null;
     for (const t of S.thoughts) {
       const pre = {
@@ -893,7 +1057,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
   // ---------- rendering ----------
 
   function renderBadge() {
-    $('#mode-badge').textContent = LLM.hasKey() ? 'Gemini' : 'Offline mode';
+    $('#mode-badge').textContent = LLM.hasKey() ? LLM.providerLabel() : 'Offline mode';
     $('#mode-badge').className = 'badge ' + (LLM.hasKey() ? 'on' : 'off');
   }
 
@@ -902,8 +1066,6 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     $('#journey-title').value = journey.title;
     document.title = journey.title + ' · Kahyo';
     $('#planned').value = journey.plannedLength;
-    $('#threshold').value = journey.threshold;
-    $('#threshold-val').textContent = Number(journey.threshold).toFixed(2);
     renderGraph(opts);
     renderStats();
     renderCharacters();
@@ -914,12 +1076,14 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     renderBadge();
   }
 
+  // The line's angle from 0° (pointing right): the Footstep's signed direction
+  // against the thread, so an on-course story runs left to right.
   function heading(f) {
-    return clamp(f.metrics?.direction ?? 0, -1, 1) * MAX_ANGLE;
+    return f.metrics?.direction ?? 0;
   }
 
   function segLength(f) {
-    return clamp(30 + 7 * (f.metrics?.magnitude ?? 1), 55, 190);
+    return clamp(40 + 5 * (f.metrics?.magnitude ?? 4), 60, 200);
   }
 
   function step(f, extraDeg = 0) {
@@ -929,7 +1093,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
   }
 
   // Positions: each main Footstep is placed from the one before it by its own
-  // vector. Branches leave the moment they grew from by their own vector.
+  // vector. Side paths leave the Footstep they grew from by their own vector.
   function layout(visible) {
     const pos = {};
     let x = 0;
@@ -951,7 +1115,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
         const root = branchRoot(f);
         const base = (root && pos[root.id]) || { x, y };
         const k = (fan[root?.id] = (fan[root?.id] || 0) + 1);
-        const s = step(f, -18 * (k - 1));
+        const s = step(f, f.thread === 'branch' && Math.abs(heading(f)) < 25 ? -35 - 18 * (k - 1) : -18 * (k - 1));
         pos[f.id] = { x: base.x + s.dx, y: base.y + s.dy };
       });
     return pos;
@@ -1004,17 +1168,20 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     const nodes = visible.map((f) => {
       const hasViolation = f.violations?.some((v) => v);
       const branch = f.thread === 'branch';
-      const data = NSMM.dataAmount(f);
-      const heavy = data > NSMM.SPLIT_AT;
-      const over = inspecting() && (f.metrics?.terminancy ?? 0) > journey.threshold;
+      const m = f.metrics || {};
+      const heavy = m.sizeFlag === 'jump';
+      const over = inspecting() && (f.thread === 'main' ? m.dirStatus === 'off' : m.branch === 'terminate');
+      const intensity = NSMM.intensity(f);
+      const status = f.thread === 'main' ? { on: 'on course', wander: 'wandering slightly', off: 'off course' }[m.dirStatus] || '' : 'side path';
       return {
         id: f.id,
         x: pos[f.id].x,
         y: pos[f.id].y,
         fixed: true,
-        label: f.id,
-        title: `${num[f.id] ? `#${num[f.id]} · ` : 'Branch · '}${f.id}\n${f.event}\nData ${data} / ${NSMM.SPLIT_AT}${heavy ? ' (heavy: consider splitting)' : ''}`,
-        size: 8 + 16 * Math.min(1, data / NSMM.SPLIT_AT),
+        // Short labels keep a long Journey readable: FS#012 shows as 12.
+        label: f.id.replace(/^FS#0*/, ''),
+        title: `${num[f.id] ? `#${num[f.id]} · ` : 'Side path · '}${f.id}\n${f.event}\n${status}${m.sizeFlag ? ` · ${m.sizeFlag === 'jump' ? 'Jump' : 'Crawl'}` : ''}`,
+        size: 8 + 16 * intensity,
         shape: 'dot',
         color: {
           background: branch ? C.branchBg : hasViolation ? C.breakBg : C.bg,
@@ -1023,7 +1190,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
           hover: { background: C.bg, border: '#FD3A0A' },
         },
         borderWidth: heavy || over ? 4 : hasViolation || branch ? 3 : 2,
-        // Past the Terminancy threshold: a thick amber outline with a glow.
+        // Off course (or a side path past terminancy): a thick outline with a glow.
         shadow: { enabled: over, color: C.amber, size: 14, x: 0, y: 0 },
         shapeProperties: { borderDashes: branch ? [6, 4] : heavy ? [3, 3] : false },
         font: labelFont(1),
@@ -1044,11 +1211,13 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
           to: e.to,
           arrows: { to: { enabled: true, scaleFactor: 0.6 } },
           color: { color: e.type === 'temporal' ? C.order : EDGE_TYPES[e.type]?.color || '#888', opacity: vecLine ? 0.9 : 0.55 },
-          dashes: e.type === 'thematic' || (vecLine && to.thread === 'branch'),
+          dashes: e.type === 'casual' || (vecLine && to.thread === 'branch'),
           title: vecLine
-            ? `${e.from} → ${e.to}\nDirection ${(m.direction ?? 0).toFixed(2)} (line at ${heading(to).toFixed(0)}°)\nMagnitude ${(m.magnitude ?? 0).toFixed(1)} (line length)`
+            ? inspecting()
+              ? `${e.from} → ${e.to}\nDirection ${deg(m.direction ?? 0)}\nMagnitude ${m.magnitude ?? 0}`
+              : `${e.from} → ${e.to}`
             : EDGE_TYPES[e.type]?.label,
-          width: vecLine ? 2.5 : e.type === 'causal' || e.type === 'setup_resolution' ? 1.6 : 1.1,
+          width: vecLine ? 2.5 : e.type === 'cause' ? 1.6 : 1.1,
           smooth: vecLine ? false : { type: 'curvedCW', roundness: 0.3 },
         };
       });
@@ -1058,8 +1227,13 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     let last = null;
     order.forEach((id) => {
       const f = fsById(id);
-      if (f.stage && f.stage !== last) stageMarks.push({ ...pos[id], stage: f.stage });
+      if (f.stage && f.stage !== last) stageMarks.push({ ...pos[id], stage: f.stage, lift: 0 });
       last = f.stage;
+    });
+    // Stage names that would touch the one before are lifted a row.
+    stageMarks.forEach((m, i) => {
+      const prev = stageMarks[i - 1];
+      if (prev && Math.abs(m.x - prev.x) < 160 && !prev.lift) m.lift = 1;
     });
 
     if (typeof vis === 'undefined') {
@@ -1079,7 +1253,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
         else if (!p.edges.length) closeDrawer();
       });
       network.on('zoom', scaleLabels);
-      // Quiet notes: a small dot on each moment that has one.
+      // Quiet notes: a small dot on each Footstep that has one.
       network.on('afterDrawing', (ctx) => {
         if (!journey) return;
         const k = 1 / Math.max(0.2, network.getScale());
@@ -1113,18 +1287,19 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
         const bg = cssVar('--bg2');
         ctx.textAlign = 'right';
         stageMarks.forEach((s) => {
+          const up = (52 + 18 * s.lift) * k;
           ctx.strokeStyle = 'rgba(253, 58, 10, 0.35)';
           ctx.setLineDash([3, 4]);
           ctx.beginPath();
           ctx.moveTo(s.x, s.y - 26);
-          ctx.lineTo(s.x, s.y - 26 - 52 * k);
+          ctx.lineTo(s.x, s.y - 26 - up);
           ctx.stroke();
           ctx.setLineDash([]);
           ctx.lineWidth = 4 * k;
           ctx.strokeStyle = bg;
-          ctx.strokeText(s.stage, s.x - 6 * k, s.y - 26 - 44 * k);
+          ctx.strokeText(s.stage, s.x - 6 * k, s.y - 26 - up + 8 * k);
           ctx.fillStyle = head;
-          ctx.fillText(s.stage, s.x - 6 * k, s.y - 26 - 44 * k);
+          ctx.fillText(s.stage, s.x - 6 * k, s.y - 26 - up + 8 * k);
           ctx.lineWidth = k;
         });
         ctx.restore();
@@ -1172,43 +1347,64 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     const sel = $('#place');
     const keep = sel.value || 'AUTO';
     const order = mainInOrder();
+    // Side-path tips: the last Footstep on each side path that has not ended.
+    const tips = journey.footsteps.filter(
+      (f) => f.thread === 'branch' && !pathStart(f).ended && !journey.edges.some((e) => e.from === f.id && e.type === 'temporal' && fsById(e.to)?.thread === 'branch')
+    );
     sel.innerHTML =
       `<option value="AUTO">${LLM.hasKey() ? 'Let Kahyo decide' : 'At the end'}</option><option value="START">At the very start</option>` +
-      order.map((f, i) => `<option value="${esc(f.id)}">After ${i + 1}. ${esc(shortText(f.event, 40))}</option>`).join('');
+      order.map((f, i) => `<option value="${esc(f.id)}">After ${i + 1}. ${esc(shortText(f.event, 40))}</option>`).join('') +
+      tips.map((f) => `<option value="${esc(f.id)}">Continue side path after ${esc(f.id)}</option>`).join('');
     sel.value = [...sel.options].some((o) => o.value === keep) ? keep : 'AUTO';
   }
 
+  // Storyline (Inspect): the factors, the planned length and the story's stats.
   function renderStats() {
     const main = journey.footsteps.filter((f) => f.thread === 'main');
-    const ji = NSMM.journeyIntent(main);
-    const branches = journey.footsteps.filter((f) => f.thread === 'branch').length;
+    const branches = journey.footsteps.filter((f) => f.thread === 'branch');
     const open = journey.alerts.filter((a) => a.open).length;
-    const beyond = journey.footsteps.filter((f) => f.thread !== 'archived' && (f.metrics?.terminancy ?? 0) > journey.threshold).length;
-    const stat = (v, word, maths, cls = '') => `<div class="${cls}" title="${maths}"><span>${v}</span>${word}<small class="mword">${maths}</small></div>`;
+    const st = NSMM.threadStats(main);
+    const count = (fn) => main.filter((f) => f.metrics && fn(f.metrics)).length;
+    const off = count((m) => m.dirStatus === 'off');
+    const wander = count((m) => m.dirStatus === 'wander');
+    const jumps = count((m) => m.sizeFlag === 'jump');
+    const crawls = count((m) => m.sizeFlag === 'crawl');
+    const tf = tfValue();
+    const after = NSMM.stageLabelAfter(journey.plannedLength);
+    const stat = (v, word, cls = '') => `<div class="${cls}"><span>${v}</span>${word}</div>`;
     $('#stats').innerHTML =
-      stat(main.length, 'moments', 'main thread') +
-      stat(branches, 'side paths', 'branches') +
-      stat(ji ? ji.magnitude.toFixed(1) : '–', 'size of moments', 'avg magnitude') +
-      stat(ji ? (ji.direction >= 0 ? '+' : '') + ji.direction.toFixed(2) : '–', 'pull to the ending', 'direction') +
-      stat(beyond, 'off course', 'past terminancy threshold', beyond ? 'warn' : '') +
-      stat(open, 'notes', 'open alerts', open ? 'warn' : '');
+      stat(main.length, 'on the main thread') +
+      stat(branches.length, 'side paths') +
+      stat(open, 'open notes', open ? 'warn' : '') +
+      stat(off, 'off course', off ? 'warn' : '') +
+      stat(wander, 'wandering') +
+      stat(`${jumps} / ${crawls}`, 'jumps / crawls') +
+      stat(st ? st.magnitude.toFixed(1) : '–', 'average magnitude') +
+      stat(st ? st.intensity.toFixed(2) : '–', 'average intensity') +
+      stat(`${NSMM.directionLimit(tf, journey.stage).toFixed(0)}°`, `direction limit${journey.stage ? ' in ' + journey.stage : ''}`);
+    $('#tf').value = tf;
+    $('#tf-val').textContent = tf.toFixed(2);
+    $('#tf-note').textContent = Number.isFinite(journey.tf)
+      ? `Set by you. Automatic for ${journey.plannedLength} planned Footsteps would be ${NSMM.autoTerminancy(journey.plannedLength).toFixed(2)}.`
+      : `Automatic from ${journey.plannedLength} planned Footsteps: longer stories are more lenient. Drag to override.`;
+    if (Number.isFinite(journey.tf) && !$('#tf-auto')) $('#tf-note').insertAdjacentHTML('beforeend', ' <a href="#" id="tf-auto">Back to automatic</a>');
+    $('#branch-share').value = journey.branchShare;
+    $('#branch-share-val').textContent = Math.round(journey.branchShare * 100) + '%';
     const h = storyHealth();
     const hb = $('#health');
     hb.className = 'health ' + h.level;
     hb.innerHTML = `<i></i>${h.label}`;
-    hb.title = `${main.length} moments, ${branches} side paths, ${beyond} off course (terminancy above ${Number(journey.threshold).toFixed(2)}), average size ${ji ? ji.magnitude.toFixed(1) : '–'}, pull ${ji ? ji.direction.toFixed(2) : '–'}. Click for notes.`;
+    hb.title = h.why + ' Click for more.';
+    $('#health-why').innerHTML = `<strong>${h.label}.</strong> ${esc(h.why)}`;
     const n = main.length;
-    if (n < NSMM.STAGE_LABEL_AFTER) {
+    if (n < after) {
       $('#rail').innerHTML =
-        NSMM.STAGES.map((s) => `<li class="pending">${s}</li>`).join('') +
-        `<li class="rail-note">Stages are labelled after ${NSMM.STAGE_LABEL_AFTER} Footsteps · ${n}/${NSMM.STAGE_LABEL_AFTER}</li>`;
+        NSMM.STAGES.map((s) => `<li class="pending">${s}</li>`).join('') + `<li class="rail-note">Stages are labelled after ${after} Footsteps · ${n}/${after}</li>`;
     } else {
       const counts = {};
       mainInOrder().forEach((f) => (counts[f.stage] = (counts[f.stage] || 0) + 1));
       const now = NSMM.STAGES.indexOf(journey.stage);
-      $('#rail').innerHTML = NSMM.STAGES.map(
-        (s, i) => `<li class="${i < now ? 'done' : i === now ? 'now' : ''}">${s}${counts[s] ? ` · ${counts[s]}` : ''}</li>`
-      ).join('');
+      $('#rail').innerHTML = NSMM.STAGES.map((s, i) => `<li class="${i < now ? 'done' : i === now ? 'now' : ''}">${s}${counts[s] ? ` · ${counts[s]}` : ''}</li>`).join('');
     }
     $('#alert-count').textContent = open ? String(open) : '';
     $('#alert-count').className = open ? 'count' : '';
@@ -1228,17 +1424,23 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
         <div class="chips">${c.physical.map((p, i) => `<span class="chip">${esc(p)}<button data-phys-del="${i}" aria-label="Remove ${esc(p)}">×</button></span>`).join('') || '<span class="muted small">None yet.</span>'}</div>
         <form class="add-physical"><input placeholder="Add a feature, e.g. big, fat king" aria-label="New physical feature" /></form>
         <button class="small" data-char-pick>Pick from the story</button>
-        <h4>Traits and strictness</h4>
+        ${c.aliases?.length ? `<p class="small muted">Also called ${c.aliases.map(esc).join(', ')}</p>` : ''}
+        <h4>Traits</h4>
+        <div class="chips">${c.traits.map((t, ti) => `<span class="chip">${esc(t.text)}<button data-trait-del="${ti}" aria-label="Remove ${esc(t.text)}">×</button></span>`).join('') || '<span class="muted small">None yet.</span>'}</div>
+        <form class="add-trait"><input placeholder="Add a trait, e.g. jealous" aria-label="New trait" /></form>
+        <div class="field strict">
+          <span>Strictness<small class="mword">how firmly the traits hold</small></span>
+          <div class="slider-row"><input class="strictness" type="range" min="0" max="1" step="0.1" value="${c.strictness ?? 0.6}" aria-label="Strictness" /><b class="strict-val">${(c.strictness ?? 0.6).toFixed(1)}</b></div>
+          <p class="muted small">Higher means ${esc(c.name)} is less likely to change. When they act against a trait, Kahyo notes it and can remold the Footstep to fit.</p>
+        </div>
         ${
-          c.traits
-            .map(
-              (t, ti) => `<div class="trait-row"><span>${esc(t.text)}</span><span class="trait-ctl">
-            <select data-ti="${ti}" class="trait-level" aria-label="Strictness">${['strict', 'moderate', 'flexible', 'off'].map((l) => `<option ${l === t.level ? 'selected' : ''}>${l}</option>`).join('')}</select>
-            <button class="x" data-trait-del="${ti}" aria-label="Remove trait">×</button></span></div>`
-            )
-            .join('') || '<p class="muted small">No traits yet. A strict trait is guarded on every Footstep.</p>'
+          journey.characters.length > 1
+            ? `<form class="merge-char"><label class="small">Same person as <select aria-label="Merge into">${journey.characters
+                .filter((x) => x !== c)
+                .map((x) => `<option value="${esc(x.name)}">${esc(x.name)}</option>`)
+                .join('')}</select></label><button class="small">Merge</button></form>`
+            : ''
         }
-        <form class="add-trait"><input placeholder="Add trait, e.g. never abandons a friend" aria-label="New trait" /></form>
         <h4>In these Footsteps</h4>
         <ul class="appear">${r.hits.map((f) => `<li><a href="#" data-goto="${esc(f.id)}">${esc(f.id)}</a> ${esc(shortText(f.event, 60))}</li>`).join('') || '<li class="muted">None yet.</li>'}</ul>`;
       return;
@@ -1282,92 +1484,121 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     $('#char-toggle').classList.toggle('open', open);
   }
 
+  const NOTE_TITLES = {
+    off: 'Off course',
+    wander: 'Wandering slightly',
+    jump: 'Jump',
+    crawl: 'Crawl',
+    drifting: 'Side path drifting',
+    terminate: 'Side path at its limit',
+    drift: 'The story is drifting',
+    terminancy: 'Moved to a side path',
+    contradiction: 'Points against the story',
+    heavy: 'Holds a lot',
+  };
+
+  function noteActions(a) {
+    const b = (act, label) => `<button data-a="${a.id}" data-act="${act}">${label}</button>`;
+    const fs = fsById(a.fsId);
+    switch (a.kind) {
+      case 'off':
+        return fs?.thread === 'main' ? b('branch', 'Branch it') + b('accept', 'Keep on the main story') : b('accept', 'Clear');
+      case 'jump':
+        return b('split', 'Split in two') + b('accept', 'Keep as one');
+      case 'terminate':
+        return b('end', 'Let it end here') + b('change', 'Change its steps') + b('accept', 'Keep going');
+      case 'trait':
+        return b('remold', 'Remold to fit') + b('accept', "It's intentional") + b('relax', 'Loosen the character');
+      case 'drift':
+        return b('dismiss', "It's on purpose");
+      case 'heavy':
+        return b('split', 'Split in two') + b('accept', 'Keep as one');
+      case 'terminancy':
+        return fs?.thread === 'branch' ? b('keep', 'Bring into main story') + b('accept', 'Clear') : b('accept', 'Clear');
+      default:
+        return b('accept', 'Clear');
+    }
+  }
+
+  function noteHtml(a) {
+    const title = a.kind === 'trait' ? 'Out of character' : NOTE_TITLES[a.kind] || 'Note';
+    const maths = a.kind === 'trait' ? `trait break · ${a.severity}` : a.maths || '';
+    return `<div class="alert note ${a.kind} ${a.severity || ''}">
+      <div class="alert-title"><i class="ndot"></i>${title}${maths ? `<small class="mword">${esc(maths)}</small>` : ''}</div>
+      <p>${esc(a.text)} <a href="#" data-goto="${esc(a.fsId)}">View</a></p>
+      ${a.suggestion ? `<p class="suggest">${esc(a.suggestion)}</p>` : ''}
+      <div class="actions">${noteActions(a)}</div>
+    </div>`;
+  }
+
+  // Notes stay until the writer clears them, one by one or all at once.
   function renderAlerts() {
     const el = $('#alerts');
     const list = journey.alerts.filter((a) => a.open);
+    $('#clear-notes').hidden = list.length < 2;
     if (!list.length) {
-      el.innerHTML = '<p class="muted">No notes right now. When a moment wanders off, a character acts out of character, or a moment holds too much, Kahyo leaves a quiet note here.</p>';
+      el.innerHTML = '<p class="muted">No notes right now. When a Footstep wanders off course, jumps or crawls, a character acts out of character, or a side path goes too far, Kahyo leaves a quiet note here. Notes stay until you clear them.</p>';
       return;
     }
-    const titles = {
-      terminancy: ['Wandered off course', 'terminancy'],
-      contradiction: ['Points against the story', 'contradiction review'],
-      heavy: ['Holds a lot', 'data above split limit'],
-      drift: ['The story is drifting', 'story drift'],
-    };
-    el.innerHTML = list
-      .map((a) => {
-        const actions =
-          a.kind === 'terminancy'
-            ? `<button data-a="${a.id}" data-act="keep">Keep it in the main story</button><button data-a="${a.id}" data-act="archive">Set it aside</button>`
-            : a.kind === 'trait'
-            ? `<button data-a="${a.id}" data-act="accept">It's intentional</button><button data-a="${a.id}" data-act="relax">Loosen the trait</button><button data-a="${a.id}" data-act="remove">Remove moment</button>`
-            : a.kind === 'drift'
-            ? `<button data-a="${a.id}" data-act="dismiss">It's on purpose</button>`
-            : a.kind === 'heavy'
-            ? `<button data-a="${a.id}" data-act="split">Split in two</button><button data-a="${a.id}" data-act="accept">Keep as one</button>`
-            : `<button data-a="${a.id}" data-act="accept">It's intentional</button><button data-a="${a.id}" data-act="remove">Remove moment</button>`;
-        const [title, maths] = a.kind === 'trait' ? ['Out of character', `trait break · ${a.severity}`] : titles[a.kind];
-        return `<div class="alert note ${a.kind} ${a.severity || ''}">
-          <div class="alert-title"><i class="ndot"></i>${title}<small class="mword">${maths}${a.maths ? ` · ${esc(a.maths)}` : ''}</small></div>
-          <p>${esc(a.text)} <a href="#" data-goto="${esc(a.fsId)}">View</a></p>
-          ${a.suggestion ? `<p class="suggest">${esc(a.suggestion)}</p>` : ''}
-          <div class="actions">${actions}</div>
-        </div>`;
-      })
-      .join('');
+    el.innerHTML = list.map(noteHtml).join('');
   }
 
-  // The Intent Vector in a writer's words.
+  // The Footstep in a writer's words.
   function pullWords(f) {
     const m = f.metrics || {};
-    const mags = journey.footsteps.filter((x) => x.thread !== 'archived' && x.metrics).map((x) => x.metrics.magnitude).sort((a, b) => a - b);
-    const rank = mags.length > 1 ? mags.indexOf(m.magnitude) / (mags.length - 1) : 0.5;
-    const size = rank > 0.66 ? 'A big moment' : rank < 0.33 ? 'A small moment' : 'A mid-sized moment';
-    const d = m.direction ?? 0;
-    const pull = d > 0.3 ? 'that pulls toward your ending' : d < -0.1 ? 'that pulls away from your ending' : 'that holds the story steady';
-    const off = (m.terminancy ?? 0) > journey.threshold ? ' It wanders off course.' : '';
-    return `${size} ${pull}.${off}`;
+    if (f.thread === 'branch') {
+      const st = { ok: 'It stays close to where its side path began.', drifting: 'Its side path is drifting further away.', terminate: 'Its side path has gone so far it will be hard to bring back.' };
+      return st[m.branch] || 'A side path.';
+    }
+    if (!m.limit || f.thread !== 'main') return '';
+    const size = m.sizeFlag === 'jump' ? 'A Jump: a lot happens at once' : m.sizeFlag === 'crawl' ? 'A Crawl: little happens' : 'A usual-sized step';
+    const dir = m.dirStatus === 'off' ? 'that goes off course' : m.dirStatus === 'wander' ? 'that wanders slightly' : 'on course';
+    return `${size}, ${dir}.`;
   }
 
-  // The selected moment's packet, editable, shown in the drawer.
+  // The selected Footstep's packet, editable, shown in the drawer.
   function renderDetail() {
     const el = $('#detail');
     const f = selectedId && fsById(selectedId);
     if (!f) {
-      el.innerHTML = '<p class="muted">Click a moment on the map.</p>';
+      el.innerHTML = '<p class="muted">Click a Footstep on the map.</p>';
       return;
     }
-    const m = f.metrics || {};
     const pos = storyOrder().indexOf(f.id);
-    const seeds = journey.edges.map((e, i) => ({ ...e, i })).filter((e) => e.to === f.id || e.from === f.id);
+    const links = journey.edges.map((e, i) => ({ ...e, i })).filter((e) => (e.to === f.id || e.from === f.id) && e.type !== 'temporal');
     const others = journey.footsteps.filter((x) => x.id !== f.id && x.thread !== 'archived');
+    const linkLabel = (e) => {
+      const t = EDGE_TYPES[e.type] || EDGE_TYPES.casual;
+      if (e.type === 'cause') return e.from === f.id ? `Causes → ${esc(e.to)}` : `${t.back} ← ${esc(e.from)}`;
+      return `${t.label} · ${esc(e.from === f.id ? e.to : e.from)}`;
+    };
+    const notes = journey.alerts.filter((a) => a.open && a.fsId === f.id);
     el.innerHTML = `
-      <div class="fs-head"><strong>${pos >= 0 ? `#${pos + 1} · ` : ''}${esc(f.id)}</strong><span class="pill ${f.thread}">${f.thread}</span><span class="pill">${esc(f.stage || 'unstaged')}</span></div>
-      <label class="field"><span>What happens<small class="mword">event</small></span><textarea data-edit="event" rows="2">${esc(f.event)}</textarea></label>
-      <label class="field"><span>Who<small class="mword">subjects</small></span><input data-edit="subjects" value="${esc((f.subjects || []).join(', '))}" placeholder="Comma separated" /></label>
-      <label class="field"><span>Where and when<small class="mword">context</small></span><input data-edit="context" value="${esc(f.context || '')}" placeholder="Where, when, circumstances" /></label>
-      <details class="more"><summary>Setups and world rules</summary>
-        <label class="field"><span>Setups to pay off later, one per line<small class="mword">promises</small></span><textarea data-edit="promises" rows="2">${esc((f.promises || []).join('\n'))}</textarea></label>
-        <label class="field"><span>World rules (one per line)</span><textarea data-edit="world_rules" rows="2">${esc((f.world_rules || []).join('\n'))}</textarea></label>
+      <div class="fs-head"><strong>${pos >= 0 ? `#${pos + 1} · ` : ''}${esc(f.id)}</strong><span class="pill ${f.thread}">${f.thread === 'branch' ? 'side path' : f.thread}</span><span class="pill">${esc(f.stage || 'unstaged')}</span></div>
+      <label class="field"><span>What happens<small class="mword">event · your words</small></span><textarea data-edit="event" rows="3">${esc(f.event)}</textarea></label>
+      <label class="field"><span>Who<small class="mword">characters</small></span><input data-edit="subjects" value="${esc((f.subjects || []).join(', '))}" placeholder="Comma separated" /></label>
+      <label class="field"><span>Where<small class="mword">environment</small></span><input data-edit="environment" value="${esc((f.environment || []).join(', '))}" placeholder="The place or space where it happens" /></label>
+      <label class="field"><span>When and how<small class="mword">context</small></span><input data-edit="context" value="${esc(f.context || '')}" placeholder="Time, circumstances" /></label>
+      <details class="more"><summary>Setups to pay off later</summary>
+        <label class="field"><span>One per line<small class="mword">promises</small></span><textarea data-edit="promises" rows="2">${esc((f.promises || []).join('\n'))}</textarea></label>
       </details>
-      <div class="field"><span>How it moves the story<small class="mword">intent vector</small></span>
-        <p class="iv-words">${pullWords(f)}</p>
-        <p class="iv-line inspect-only">Magnitude <strong>${(m.magnitude ?? 0).toFixed(1)}</strong> · direction <strong>${(m.direction ?? 0) >= 0 ? '+' : ''}${(m.direction ?? 0).toFixed(2)}</strong> · angle <strong>${(m.angle ?? 0).toFixed(0)}°</strong> · terminancy <strong class="${m.is_branch_candidate ? 'warn-text' : ''}">${(m.terminancy ?? 0).toFixed(2)}</strong></p>
-      </div>
-      <div class="field"><span>Links to other moments<small class="mword">seeds</small></span>
+      ${pullWords(f) ? `<p class="iv-words">${pullWords(f)}</p>` : ''}
+      ${notes.length ? `<div class="fs-notes inspect-only">${notes.map(noteHtml).join('')}</div>` : ''}
+      <div class="field"><span>Links to other Footsteps<small class="mword">setups and links</small></span>
         <ul class="seeds">${
-          seeds
-            .map((e) => `<li><span class="dot" style="background:${EDGE_TYPES[e.type]?.color}"></span>${e.to === f.id ? `← ${esc(e.from)}` : `→ ${esc(e.to)}`} · ${EDGE_TYPES[e.type]?.label}<button class="ghost small" data-seed-del="${e.i}" aria-label="Delete this link">Delete</button></li>`)
+          links
+            .map((e) => `<li><span class="dot" style="background:${EDGE_TYPES[e.type]?.color}"></span>${linkLabel(e)}<button class="ghost small" data-seed-del="${e.i}" aria-label="Delete this link">Delete</button></li>`)
             .join('') || '<li class="muted">No links yet.</li>'
         }</ul>
-        ${seeds.length > 1 ? '<button class="ghost small" data-seeds-clear>Delete all links</button>' : ''}
+        ${links.length > 1 ? '<button class="ghost small" data-seeds-clear>Delete all links</button>' : ''}
         <form class="add-seed">
-          <select name="from" aria-label="Linked from">${others.map((x) => `<option value="${esc(x.id)}">${esc(x.id)} ${esc(shortText(x.event, 28))}</option>`).join('')}</select>
-          <select name="type" aria-label="Link type">${Object.entries(EDGE_TYPES)
-            .filter(([k]) => k !== 'temporal')
-            .map(([k, t]) => `<option value="${k}">${t.label}</option>`)
-            .join('')}</select>
+          <select name="type" aria-label="Link type">
+            <option value="cause-out">Causes</option>
+            <option value="cause-in">Is a consequence of</option>
+            <option value="casual">Casual link to</option>
+            <option value="character_arc">Character arc with</option>
+          </select>
+          <select name="other" aria-label="Other Footstep">${others.map((x) => `<option value="${esc(x.id)}">${esc(x.id)} ${esc(shortText(x.event, 28))}</option>`).join('')}</select>
           <button>Link</button>
         </form>
       </div>
@@ -1375,7 +1606,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       <details><summary>What you said</summary><p class="quote">${esc(f.transcript || '')}</p></details>`;
   }
 
-  // Right pane, bottom half: move the Footstep and tune its Intent Vector.
+  // Right pane, bottom half: move the Footstep, its intensity, and (Inspect) its numbers.
   function renderModifier() {
     const el = $('#modifier');
     const f = selectedId && fsById(selectedId);
@@ -1383,67 +1614,90 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       el.innerHTML = '';
       return;
     }
-    const data = NSMM.dataAmount(f);
     el.innerHTML = `
       <div class="actions">
         ${f.thread === 'main' ? `<button data-place-after="${esc(f.id)}">Add next idea after this</button><button data-shift="-1" aria-label="Move earlier in the story">↑ Earlier</button><button data-shift="1" aria-label="Move later in the story">↓ Later</button>` : ''}
+        ${f.thread === 'branch' ? `<button data-place-after="${esc(f.id)}">Continue this side path</button>` : ''}
         ${f.thread !== 'main' ? `<button data-move="main">Bring into main story</button>` : `<button data-move="branch">Make it a side path</button>`}
-        <button data-split class="${data > NSMM.SPLIT_AT ? 'primary' : ''}">Split in two</button>
+        <button data-split class="${f.metrics?.sizeFlag === 'jump' ? 'primary' : ''}">Split in two</button>
         <button data-move="archived">Set aside</button>
         <button data-delete class="ghost">Delete</button>
       </div>
-      <div id="mod-data"></div>
       <div class="iv">
-        <div class="iv-title">How it moves the story<small class="mword">intent vector</small></div>
-        <div class="iv-wrap"><div id="iv-gauge"></div>
-          <div class="sliders">
-            <label>How intense<small class="mword">plot intensity</small> <b id="v-pi"></b><input type="range" min="0" max="1" step="0.05" data-iv="plot_intensity" value="${Number(f.plot_intensity)}" /></label>
-            <label>Exploring or closing in<small class="mword">intent signal</small> <b id="v-is"></b><input type="range" min="-1" max="1" step="0.1" data-iv="intent_signal" value="${Number(f.intent_signal)}" /><span class="ends"><small>exploring</small><small>closing in</small></span></label>
-          </div>
-        </div>
-        <div id="iv-ranges"></div>
+        <div class="iv-title">Intensity<small class="mword">0 to 1 · circle size</small></div>
+        <div class="slider-row"><input type="range" min="0" max="1" step="0.05" data-intensity value="${NSMM.intensity(f)}" aria-label="Intensity" /><b id="v-int"></b></div>
+        <p class="muted small" id="int-note"></p>
+        <div id="iv-readout" class="inspect-only"></div>
       </div>`;
     updateReadouts(f);
   }
 
   function updateReadouts(f) {
-    const data = NSMM.dataAmount(f);
-    $('#mod-data').innerHTML = `<div class="range-row inspect-only"><span>How much it holds<small class="mword">data</small></span><div class="track"><i style="width:${Math.min(100, (100 * data) / NSMM.SPLIT_AT)}%" class="${data > NSMM.SPLIT_AT ? 'over' : ''}"></i></div><b>${data}/${NSMM.SPLIT_AT}</b></div>`;
-    $('[data-split]')?.classList.toggle('primary', data > NSMM.SPLIT_AT);
     const m = f.metrics || {};
-    const mags = journey.footsteps.filter((x) => x.thread !== 'archived' && x.metrics).map((x) => x.metrics.magnitude);
-    const lo = Math.min(...mags);
-    const hi = Math.max(...mags);
-    const at = (v, a, b) => (b > a ? (100 * (v - a)) / (b - a) : 50);
-    const dir = m.direction ?? 0;
-    const thr = Number(journey.threshold);
-    $('#v-pi').textContent = Number(f.plot_intensity).toFixed(2);
-    $('#v-is').textContent = (f.intent_signal >= 0 ? '+' : '') + Number(f.intent_signal).toFixed(1);
-    $('#iv-gauge').innerHTML = gauge(m.angle ?? 0);
+    const ai = Number.isFinite(f.intensity);
+    $('#v-int').textContent = NSMM.intensity(f).toFixed(2);
+    $('#int-note').textContent = ai ? (f.intensityByWriter ? 'Set by you.' : 'Judged by the AI. Drag to change it.') : 'Estimated offline from how much happens. Drag to set it.';
+    $('[data-split]')?.classList.toggle('primary', m.sizeFlag === 'jump');
+    const box = $('#iv-readout');
+    if (!box) return;
+    const row = (k, v, warn) => `<dt>${k}</dt><dd class="${warn ? 'warn' : ''}">${v}</dd>`;
+    const judged = Number.isFinite(m.limit) && storyOrder().length >= 3;
+    const status = { on: 'on course', wander: 'wandering slightly', off: 'off course' }[m.dirStatus] || '–';
+    let html = `<div class="iv-wrap">${gauge(m.direction ?? 0, m.limit ?? 180)}<dl class="readout">
+      ${row('Magnitude', `${m.magnitude ?? 0} <small class="muted">usual ${(m.avgMagnitude ?? 0).toFixed(0)}</small>`, Boolean(m.sizeFlag))}
+      ${row('Size', m.sizeFlag === 'jump' ? 'Jump' : m.sizeFlag === 'crawl' ? 'Crawl' : 'usual', Boolean(m.sizeFlag))}
+      ${row('Direction', judged ? deg(m.direction ?? 0) : 'from the 4th Footstep')}
+      ${row('Limit', judged ? `${(m.limit ?? 0).toFixed(0)}°` : '–')}
+      ${f.thread === 'main' ? row('Status', status, m.dirStatus !== 'on') : ''}
+    </dl></div>`;
+    if (f.thread === 'branch' && m.iv) {
+      const tf = tfValue();
+      const iv = m.iv;
+      html += `<div class="iv-title">Intent vector<small class="mword">aî + bĵ · from where this side path began</small></div>
+      <dl class="readout">
+        ${row('Vector', `${iv.magnitude.toFixed(2)}î ${iv.direction >= 0 ? '+' : '−'} ${Math.abs(iv.direction).toFixed(2)}ĵ`)}
+        ${row('Branching factor', iv.length.toFixed(2), m.branch !== 'ok')}
+        ${row('Drifting from', (journey.branchShare * tf).toFixed(2))}
+        ${row('Terminancy', tf.toFixed(2))}
+        ${row('State', { ok: 'close to its start', drifting: 'drifting', terminate: 'at its limit' }[m.branch] || '–', m.branch !== 'ok')}
+      </dl>`;
+    } else {
+      html += `<p class="muted small">The intent vector shows on side-path Footsteps only. This one is on the main thread.</p>`;
+    }
+    box.innerHTML = html;
     const words = $('.iv-words');
     if (words) words.textContent = pullWords(f);
-    $('#iv-ranges').innerHTML = `
-      <div class="range-row inspect-only"><span>How big a moment<small class="mword">magnitude</small></span><div class="track"><em style="left:${at(m.magnitude ?? 0, lo, hi)}%"></em></div><b>${(m.magnitude ?? 0).toFixed(1)}</b></div>
-      <div class="range-labels inspect-only"><small>${lo.toFixed(1)} smallest</small><small>line length</small><small>biggest ${hi.toFixed(1)}</small></div>
-      <div class="range-row inspect-only"><span>Pull toward your ending<small class="mword">direction</small></span><div class="track mid"><em style="left:${at(dir, -1, 1)}%"></em></div><b>${dir >= 0 ? '+' : ''}${dir.toFixed(2)}</b></div>
-      <div class="range-labels inspect-only"><small>−1 away</small><small>line at ${heading(f).toFixed(0)}°</small><small>toward +1</small></div>
-      <div class="range-row inspect-only"><span>Off course<small class="mword">terminancy</small></span><div class="track"><i style="width:${Math.min(100, 100 * (m.terminancy ?? 0))}%" class="${(m.terminancy ?? 0) > thr ? 'over' : ''}"></i><u style="left:${100 * thr}%"></u></div><b>${(m.terminancy ?? 0).toFixed(2)}</b></div>
-      <div class="range-labels inspect-only"><small>0 on course</small><small>flag at ${thr.toFixed(2)}</small><small>1 drifting</small></div>`;
   }
 
-  // Semicircle gauge for the Constitution's angle: 0° aligned … 180° contradiction.
-  function gauge(angle) {
-    const a = Math.max(0, Math.min(180, angle));
-    const rad = (a * Math.PI) / 180;
-    const x = 60 + 46 * Math.cos(rad);
-    const y = 56 - 46 * Math.sin(rad);
-    const color = a < 60 ? '#4a8c6a' : a < 120 ? '#e8b547' : '#e06464';
-    return `<svg viewBox="0 0 120 64" class="gauge" role="img" aria-label="Direction angle ${a.toFixed(0)} degrees">
-      <path d="M14 56 A46 46 0 0 1 106 56" fill="none" stroke="var(--border2-solid)" stroke-width="8" stroke-linecap="round"/>
-      <line x1="60" y1="56" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>
-      <circle cx="60" cy="56" r="4" fill="${color}"/>
-      <text x="106" y="63" text-anchor="end" class="g-l">0°</text><text x="14" y="63" text-anchor="start" class="g-l">180°</text>
-      <text x="60" y="40" text-anchor="middle" class="g-v">${a.toFixed(0)}°</text>
+  // Dial for the signed direction: 0° points right, + turns anticlockwise, − clockwise.
+  // The shaded wedge is the on-course zone (±X/2), the lines mark the off-course limit (±X).
+  function gauge(direction, limit) {
+    const R = 44;
+    const cx = 60;
+    const cy = 60;
+    const pt = (d, r = R) => [cx + r * Math.cos((d * Math.PI) / 180), cy - r * Math.sin((d * Math.PI) / 180)];
+    const arc = (a, b, r) => {
+      const [x1, y1] = pt(a, r);
+      const [x2, y2] = pt(b, r);
+      return `M${cx} ${cy}L${x1.toFixed(1)} ${y1.toFixed(1)}A${r} ${r} 0 ${Math.abs(b - a) > 180 ? 1 : 0} 0 ${x2.toFixed(1)} ${y2.toFixed(1)}Z`;
+    };
+    const lim = Math.min(180, limit);
+    const half = lim / 2;
+    const d = clamp(direction, -180, 180);
+    const color = Math.abs(d) > lim ? 'var(--red)' : Math.abs(d) > half ? 'var(--amber)' : 'var(--green)';
+    const [lx1, ly1] = pt(lim);
+    const [lx2, ly2] = pt(-lim);
+    const [nx, ny] = pt(d, R - 4);
+    return `<svg viewBox="0 0 120 120" class="gauge" role="img" aria-label="Direction ${d.toFixed(0)} degrees, limit ${lim.toFixed(0)}">
+      <circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="var(--border2-solid)" stroke-width="2"/>
+      <path d="${arc(-lim, lim, R)}" fill="color-mix(in srgb, var(--amber) 14%, transparent)"/>
+      <path d="${arc(-half, half, R)}" fill="color-mix(in srgb, var(--green) 22%, transparent)"/>
+      <line x1="${cx}" y1="${cy}" x2="${lx1.toFixed(1)}" y2="${ly1.toFixed(1)}" stroke="var(--amber)" stroke-width="1" stroke-dasharray="3 3"/>
+      <line x1="${cx}" y1="${cy}" x2="${lx2.toFixed(1)}" y2="${ly2.toFixed(1)}" stroke="var(--amber)" stroke-width="1" stroke-dasharray="3 3"/>
+      <line x1="${cx}" y1="${cy}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="${cx}" cy="${cy}" r="4" fill="${color}"/>
+      <text x="${cx + R + 3}" y="${cy + 4}" class="g-l">0°</text>
+      <text x="${cx}" y="${cy + R + 14}" text-anchor="middle" class="g-v">${deg(d)}</text>
     </svg>`;
   }
 
@@ -1497,28 +1751,41 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     } else $('#drawer').hidden = true;
   }
 
-  // Inspect docks the moment's pane in the right column as its first tab;
-  // Write floats it as a drawer over the map.
+  // Inspect docks the Footstep's pane in the right column as its first tab, next
+  // to Storyline; Write floats it as a drawer over the map, next to Notes and Draft.
   function placeDrawer() {
     const d = $('#drawer');
+    const active = $('.tab.active')?.dataset.tab;
     if (inspecting()) {
       $('#panel-footstep').appendChild(d);
       d.classList.add('docked');
       d.hidden = false;
-      showTab('footstep');
+      if (active !== 'storyline') showTab('footstep');
     } else {
       $('.layout').appendChild(d);
       d.classList.remove('docked');
       d.hidden = !selectedId;
-      if ($('.tab.active')?.dataset.tab === 'footstep') showTab('notes');
+      if (active !== 'draft') showTab('notes');
     }
+  }
+
+  function setPane(open) {
+    document.body.classList.toggle('pane-closed', !open);
+    try {
+      localStorage.setItem('kahyo.pane', open ? 'open' : 'closed');
+    } catch {}
+    if (network)
+      setTimeout(() => {
+        network.fit({ animation: false });
+        scaleLabels();
+      }, 0);
   }
 
   function inspecting() {
     return document.body.classList.contains('mode-inspect');
   }
 
-  // Write: calm, for writing. Inspect: numbers, sliders and the threshold.
+  // Write: calm, for writing. Inspect: numbers, sliders and the factors.
   function setMode(mode) {
     document.body.classList.toggle('mode-inspect', mode === 'inspect');
     document.body.classList.toggle('mode-write', mode !== 'inspect');
@@ -1658,13 +1925,13 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       f.subjects.forEach(ensureCharacter);
     }
     if (field === 'promises') f.promises = lines(value);
-    if (field === 'world_rules') f.world_rules = lines(value);
+    if (field === 'environment') f.environment = value.split(',').map((s) => s.trim()).filter(Boolean);
     // Not behind the busy lock: a blur from clicking another button fires this
     // change, and that button's own action must still run.
     return (async () => {
       if (['event', 'context', 'subjects'].includes(field)) await reembed(f);
       rescoreAll();
-      flagIfHeavy(f);
+      syncNotes([f.id]);
       save();
       renderGraph();
       renderStats();
@@ -1708,23 +1975,45 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       journey.aiStaged = 0;
       run(async () => {
         await relabelStages(true);
+        syncNotes();
         save();
         renderAll();
       });
     });
-    // Outlines follow the slider live; the drift check runs on release.
-    $('#threshold').addEventListener('input', (e) => {
-      journey.threshold = Number(e.target.value);
-      $('#threshold-val').textContent = journey.threshold.toFixed(2);
+    // Factors: outlines and numbers follow the slider live; notes are raised on release.
+    const factorChanged = () => {
       rescoreAll();
       renderGraph();
       renderStats();
-    });
-    $('#threshold').addEventListener('change', () => {
+      if (selectedId && fsById(selectedId)) updateReadouts(fsById(selectedId));
+    };
+    const factorSettled = () => {
       rescoreAll();
+      syncNotes();
       checkDrift();
       save();
       renderAll();
+    };
+    $('#tf').addEventListener('input', (e) => {
+      journey.tf = Math.round(Number(e.target.value) * 100) / 100;
+      factorChanged();
+    });
+    $('#tf').addEventListener('change', factorSettled);
+    $('#branch-share').addEventListener('input', (e) => {
+      journey.branchShare = Number(e.target.value);
+      factorChanged();
+    });
+    $('#branch-share').addEventListener('change', factorSettled);
+    $('#panel-storyline').addEventListener('click', (e) => {
+      if (e.target.id !== 'tf-auto') return;
+      e.preventDefault();
+      journey.tf = null;
+      factorSettled();
+    });
+    $('#pane-close').addEventListener('click', () => setPane(false));
+    $('#pane-open').addEventListener('click', () => setPane(true));
+    $('#clear-notes').addEventListener('click', () => {
+      if (confirm('Clear every open note?')) clearNotes();
     });
 
     document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
@@ -1755,17 +2044,22 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       if (!t || !journey) return;
       const f = selectedId && fsById(selectedId);
       const c = charView && character(charView);
-      if (t.hasAttribute('data-drift')) showTab('notes');
+      if (t.hasAttribute('data-drift')) {
+        if (document.body.classList.contains('pane-closed')) setPane(true);
+        showTab(inspecting() ? 'storyline' : 'notes');
+      }
       else if (t.hasAttribute('data-drawer-close')) closeDrawer();
       else if (t.dataset.act) resolveAlert(t.dataset.a, t.dataset.act);
       else if (t.dataset.goto) {
         e.preventDefault();
         selectFootstep(t.dataset.goto);
       } else if (t.dataset.move && f) {
-        f.thread = t.dataset.move;
-        journey.alerts.filter((a) => a.fsId === f.id && a.kind === 'terminancy').forEach((a) => (a.open = false));
+        if (t.dataset.move === 'branch') makeBranch(f);
+        else if (t.dataset.move === 'main') makeMain(f);
+        else f.thread = t.dataset.move;
         run(async () => {
           await relabelStages(false);
+          syncNotes([f.id]);
           save();
           renderAll();
         });
@@ -1779,7 +2073,11 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       } else if (t.dataset.placeAfter) {
         $('#place').value = t.dataset.placeAfter;
         $('#transcript').focus();
-        setStatus('Your next idea will go right after ' + t.dataset.placeAfter + '. Speak or type it now.');
+        setStatus(
+          (fsById(t.dataset.placeAfter)?.thread === 'branch' ? 'Your next idea will continue the side path after ' : 'Your next idea will go right after ') +
+            t.dataset.placeAfter +
+            '. Speak or type it now.'
+        );
       } else if (t.hasAttribute('data-split') && f) {
         run(() => splitFootstep(f.id));
       } else if (t.hasAttribute('data-delete') && f) {
@@ -1832,22 +2130,35 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     });
 
     // characters pane forms and strictness
-    $('#characters').addEventListener('change', (e) => {
+    $('#characters').addEventListener('input', (e) => {
       const c = charView && character(charView);
-      if (!c || !e.target.classList.contains('trait-level')) return;
-      c.traits[e.target.dataset.ti].level = e.target.value;
-      save();
+      if (!c || !e.target.classList.contains('strictness')) return;
+      c.strictness = Number(e.target.value);
+      $('#characters .strict-val').textContent = c.strictness.toFixed(1);
+    });
+    $('#characters').addEventListener('change', (e) => {
+      if (e.target.classList.contains('strictness')) save();
     });
     $('#characters').addEventListener('submit', (e) => {
       e.preventDefault();
+      const c = charView && character(charView);
+      if (e.target.classList.contains('merge-char')) {
+        const into = e.target.querySelector('select').value;
+        if (c && into && confirm(`Merge ${c.name} into ${into}? ${c.name} becomes another name for ${into} in every Footstep.`)) {
+          mergeCharacters(c.name, into);
+          charView = into;
+          save();
+          renderAll();
+        }
+        return;
+      }
       const input = e.target.querySelector('input');
       const text = input.value.trim();
       if (!text) return;
-      const c = charView && character(charView);
       if (e.target.classList.contains('add-char')) {
         ensureCharacter(text);
         charView = text;
-      } else if (e.target.classList.contains('add-trait') && c) c.traits.push({ text, level: 'strict' });
+      } else if (e.target.classList.contains('add-trait') && c) c.traits.push({ text });
       else if (e.target.classList.contains('add-physical') && c) addPhysical(c, text);
       save();
       renderCharacters();
@@ -1862,28 +2173,32 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     $('#detail').addEventListener('submit', (e) => {
       e.preventDefault();
       const f = fsById(selectedId);
-      const from = e.target.elements.from?.value;
-      if (!f || !from) return;
-      journey.edges.push({ from, to: f.id, type: e.target.elements.type.value });
+      const other = e.target.elements.other?.value;
+      if (!f || !other) return;
+      const kind = e.target.elements.type.value;
+      // A cause is stored once; its consequence shows on the other Footstep by itself.
+      if (kind === 'cause-out') journey.edges.push({ from: f.id, to: other, type: 'cause' });
+      else if (kind === 'cause-in') journey.edges.push({ from: other, to: f.id, type: 'cause' });
+      else journey.edges.push({ from: other, to: f.id, type: kind });
       save();
       renderGraph();
       renderDetail();
     });
 
-    // intent vector sliders: live readouts while dragging, graph on release
+    // intensity: live readout while dragging, graph on release
     $('#modifier').addEventListener('input', (e) => {
       const f = fsById(selectedId);
-      if (!f || !e.target.dataset.iv) return;
-      f[e.target.dataset.iv] = Number(e.target.value);
+      if (!f || !e.target.hasAttribute('data-intensity')) return;
+      f.intensity = Number(e.target.value);
+      f.intensityByWriter = true;
       rescoreAll();
       updateReadouts(f);
     });
     $('#modifier').addEventListener('change', (e) => {
-      if (!e.target.dataset.iv) return;
+      if (!e.target.hasAttribute('data-intensity')) return;
       save();
       renderGraph();
       renderStats();
-      renderDetail();
     });
 
     // menu
@@ -1946,7 +2261,17 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     $('#settings-btn').addEventListener('click', openSettings);
     $('#m-settings').addEventListener('click', openSettings);
     $('#settings-save').addEventListener('click', () => {
-      saveSettings({ apiKey: $('#api-key').value.trim(), model: $('#model').value.trim() });
+      const provider = $('#provider').value;
+      const before = LLM.settings();
+      saveSettings({
+        provider,
+        apiKey: $('#api-key').value.trim(),
+        model: $('#model').value.trim(),
+        baseUrl: $('#base-url').value.trim(),
+        embedKey: provider === 'gemini' ? '' : $('#embed-key').value.trim(),
+      });
+      // A new provider has its own model names.
+      if (before.provider !== provider && !$('#model').value.trim()) saveSettings({ model: '' });
       $('#settings').close();
       renderBadge();
       if (!journey) return;
@@ -1955,18 +2280,37 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
         rescoreAll();
         save();
         renderAll();
-        setStatus(LLM.hasKey() ? 'Gemini connected. Kahyo will now extract Footsteps with AI.' : 'Offline mode. Footsteps are split by sentence.', 'ok');
+        setStatus(LLM.hasKey() ? `${LLM.providerLabel()} connected. Kahyo will now extract Footsteps with AI.` : 'Offline mode. Footsteps are split by sentence.', 'ok');
       });
     });
     $('#settings-clear').addEventListener('click', () => {
       $('#api-key').value = '';
+      $('#embed-key').value = '';
     });
+    $('#provider').addEventListener('change', showProvider);
+  }
+
+  // Settings show what the chosen provider needs.
+  function showProvider() {
+    const p = $('#provider').value;
+    const info = LLM.PROVIDERS[p];
+    $('#api-key').placeholder = info.keyHint;
+    $('#model').placeholder = info.model || 'model name';
+    $('#base-url-row').hidden = p !== 'custom';
+    $('#embed-key-row').hidden = p === 'gemini';
+    $('#key-help').innerHTML = info.keyUrl
+      ? `Get a key at <a href="${info.keyUrl}" target="_blank" rel="noopener">${info.keyUrl.replace(/^https:\/\//, '')}</a>${p === 'gemini' || p === 'groq' ? ' (free, no card).' : '.'}`
+      : 'Any service with an OpenAI-compatible chat API.';
   }
 
   function openSettings() {
     const s = LLM.settings();
+    $('#provider').value = LLM.provider();
     $('#api-key').value = s.apiKey || '';
     $('#model').value = s.model && !/gemini-2\./.test(s.model) ? s.model : '';
+    $('#base-url').value = s.baseUrl || '';
+    $('#embed-key').value = s.embedKey || '';
+    showProvider();
     $('#settings').showModal();
   }
 
@@ -1975,17 +2319,20 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
   function init() {
     migrate();
     $('#legend').innerHTML =
-      '<span class="legend-geo">Line angle = direction · line length = magnitude · circle size = data · click a link to delete it</span>' +
+      '<span class="legend-geo">0° points right · line angle = direction · line length = magnitude · circle size = intensity · click a link to delete it</span>' +
       Object.values(EDGE_TYPES)
         .map((t) => `<span><i style="background:${t.color}"></i>${t.label}</span>`)
         .join('') +
-      '<span><i class="ring over"></i>Past threshold</span><span><i class="ring branch"></i>Branch</span><span><i class="ring heavy"></i>Heavy, split it</span><span><i class="ring broken"></i>Trait break</span>';
+      '<span><i class="ring over"></i>Off course</span><span><i class="ring branch"></i>Side path</span><span><i class="ring heavy"></i>Jump</span><span><i class="ring broken"></i>Trait break</span>';
     if (!SR) $('#mic-note').textContent = 'Voice needs Chrome or Edge. Typing works everywhere.';
     let mode = 'write';
     try {
       mode = localStorage.getItem('kahyo.mode') || 'write';
     } catch {}
     setMode(mode);
+    try {
+      if (localStorage.getItem('kahyo.pane') === 'closed') document.body.classList.add('pane-closed');
+    } catch {}
     bind();
     route();
     document.fonts?.ready.then(() => journey && renderGraph());
