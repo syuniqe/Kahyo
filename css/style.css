@@ -533,3 +533,6 @@ body.pane-closed .pane-open { display: flex; }
 .readout dd.warn { color: var(--amber); }
 .fs-notes { margin-top: 12px; }
 dialog label[hidden] { display: none; }
+
+/* Typing space: room to read and correct what the mic heard */
+#transcript { min-height: 9rem; line-height: 1.55; resize: vertical; font-size: 1rem; }

@@ -1034,7 +1034,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
   }
 
   function showHome() {
-    if (listening) recognizer.stop();
+    freezeMic();
     journey = null;
     document.body.classList.remove('view-journey');
     document.body.classList.add('view-home');
@@ -1854,6 +1854,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
   let recognizer = null;
   let listening = false;
   let baseText = '';
+  let heardFrozen = false; // set once the writer edits or adds, so late mic results never overwrite their text
 
   function toggleMic() {
     if (!SR) {
@@ -1870,9 +1871,11 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     recognizer.continuous = true;
     recognizer.interimResults = true;
     baseText = $('#transcript').value ? $('#transcript').value.trim() + ' ' : '';
+    heardFrozen = false;
     // Chrome on Android repeats the phrase so far in every result ("this", "this is",
     // "this is a"), so a result that extends the one before replaces it instead of adding to it.
     recognizer.onresult = (e) => {
+      if (heardFrozen) return;
       const parts = [];
       for (let i = 0; i < e.results.length; i++) {
         const t = e.results[i][0].transcript.trim();
@@ -1891,6 +1894,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       listening = false;
       $('#mic').classList.remove('live');
       $('#mic-label').textContent = 'Speak';
+      if (heardFrozen) return;
       if ($('#transcript').value.trim()) setStatus('Got it. Fix any words if needed, then press Add to Journey.');
     };
     recognizer.start();
@@ -1898,6 +1902,14 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     $('#mic').classList.add('live');
     $('#mic-label').textContent = 'Listening… tap to stop';
     setStatus('Listening. Speak your story the way you think it.');
+  }
+
+  // Stop the mic and ignore anything it still sends, so typed text is never replaced.
+  function freezeMic(message) {
+    if (!listening) return;
+    heardFrozen = true;
+    recognizer.stop();
+    if (message) setStatus(message);
   }
 
   // ---------- events ----------
@@ -1961,10 +1973,24 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     return (journey.title || 'journey').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'journey';
   }
 
+  function deleteFootstep(f) {
+    if (!confirm(`Delete ${f.id}? This cannot be undone.`)) return;
+    removeFootstep(f.id);
+    run(async () => {
+      await relabelStages(false);
+      save();
+      renderAll();
+      setStatus(`Deleted ${f.id}.`, 'ok');
+    });
+  }
+
   // Apply an edit to one of the Footstep's text parameters, then re-score.
   function editFootstep(f, field, value) {
     const lines = (v) => v.split('\n').map((s) => s.trim()).filter(Boolean);
-    if (field === 'event') f.event = value.trim() || f.event;
+    if (field === 'event' && value.trim()) {
+      f.event = value.trim();
+      f.transcript = f.event; // the correction replaces what the mic heard everywhere
+    }
     if (field === 'context') f.context = value.trim();
     if (field === 'subjects') {
       f.subjects = value.split(',').map((s) => s.trim()).filter(Boolean);
@@ -1994,7 +2020,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     $('#mic').addEventListener('click', toggleMic);
     $('#add').addEventListener('click', () =>
       run(async () => {
-        if (listening) recognizer.stop();
+        freezeMic();
         const text = $('#transcript').value;
         if (!text.trim()) return setStatus('Speak or type a story idea first.', 'warn');
         setStatus(LLM.hasKey() ? 'Understanding where this goes in your story…' : 'Structuring (offline mode)…');
@@ -2003,6 +2029,10 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
         $('#place').value = 'AUTO';
       })
     );
+    // Typing while the mic is on pauses it, so a correction stays put.
+    $('#transcript').addEventListener('input', (e) => {
+      if (e.isTrusted) freezeMic('Mic paused so your edit stays. Tap Speak to go on.');
+    });
     $('#transcript').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('#add').click();
     });
@@ -2127,13 +2157,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       } else if (t.hasAttribute('data-split') && f) {
         run(() => splitFootstep(f.id));
       } else if (t.hasAttribute('data-delete') && f) {
-        if (!confirm(`Delete ${f.id}? This cannot be undone.`)) return;
-        removeFootstep(f.id);
-        run(async () => {
-          await relabelStages(false);
-          save();
-          renderAll();
-        });
+        deleteFootstep(f);
       } else if (t.dataset.seedDel) {
         deleteEdge(Number(t.dataset.seedDel));
       } else if (t.dataset.edgeDel) {
@@ -2302,6 +2326,15 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && !$('#char-pop').hidden) toggleCharPop(false);
+    });
+    // Delete or Backspace removes the selected Footstep (in Write and Inspect).
+    document.addEventListener('keydown', (e) => {
+      if (!['Delete', 'Backspace'].includes(e.key) || !journey || !selectedId) return;
+      if (e.target.closest('input, textarea, select, [contenteditable]') || document.querySelector('dialog[open]')) return;
+      const f = fsById(selectedId);
+      if (!f) return;
+      e.preventDefault();
+      deleteFootstep(f);
     });
     $('#theme-btn').addEventListener('click', () => setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
     $('#settings-btn').addEventListener('click', openSettings);
