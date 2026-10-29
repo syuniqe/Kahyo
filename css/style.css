@@ -438,7 +438,11 @@ dialog .actions { justify-content: flex-end; margin-top: 16px; }
   background: var(--card); border: 1px solid var(--border2-solid); border-radius: 999px; box-shadow: 0 8px 24px rgba(20, 10, 40, 0.15);
 }
 .seeds li .ghost { margin-left: auto; padding: 2px 10px; font-size: 11.5px; }
-.legend i.ring.over { border-color: var(--amber); border-width: 3px; box-shadow: 0 0 6px var(--amber); }
+.legend i.ring.over { border-color: #9b72d9; border-width: 3px; box-shadow: 0 0 6px #9b72d9; }
+.legend i.ring.wander { border-color: #9b72d9; }
+.legend i.line { height: 0; border-radius: 0; background: none !important; border-top: 3px solid var(--c); }
+.legend i.line.casual { border-top-style: dashed; }
+.legend i.line.character_arc { border-top-style: dotted; }
 
 /* ---------- writer-first: modes, health, drawer, notes ---------- */
 body.mode-write .inspect-only { display: none !important; }

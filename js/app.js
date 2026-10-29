@@ -13,6 +13,9 @@
     character_arc: { label: 'Character arc', back: 'Character arc', color: '#6db3e0' },
     temporal: { label: 'Story order', back: 'Story order', color: '#7a7a8e' },
   };
+  // Each link type has its own line: cause solid, casual dashed, character arc dotted.
+  const LINK_DASHES = { casual: [7, 5], character_arc: [2, 4] };
+  const LILAC = '#9b72d9';
   const OLD_EDGE = { causal: 'cause', setup_resolution: 'cause', thematic: 'casual' };
   const OLD_STRICTNESS = { strict: 0.9, moderate: 0.6, flexible: 0.3, off: 0 };
   // Graph geometry: 0° points right. A Footstep's line leaves the one before it at
@@ -376,7 +379,7 @@ A writer just spoke a fragment of their story out loud. Turn it into exactly ONE
 The event is the writer's own words. Keep their wording; fix only grammar and drop filler ("um", "so basically"). Do not summarise, shorten or rephrase.
 Writers speak out of order. Decide where the new Footsteps belong in the story's timeline and set place_after. Use END unless the writer signals otherwise (e.g. "before the king...", "earlier,", "at the start", "back in step 2") or the content clearly happens earlier. Use the story so far to understand pronouns and references.
 Characters: use one canonical name per person. When the writer reveals that a description or second name is someone already known (e.g. "the prince's wife" is Rita, or Arjun's father turns out to be Krishna), add it to aliases and use the canonical name in subjects.
-Link each new Footstep to earlier ones only for a real relationship: cause (one makes the other happen; if one changed, the other would too), casual (a looser connection), or character_arc (the same character's change). Story order is tracked separately.
+Link each new Footstep to earlier ones for every real relationship: cause (one makes the other happen; if one changed, the other would too; this includes a setup and its payoff, or a promise and where it is kept), casual (a looser connection, like a shared theme, place or object), or character_arc (the same character's change or return). Most Footsteps have one or two links. Story order is tracked separately.
 Check every new Footstep against the character traits below. Strictness goes from 0 (the character may evolve freely) to 1 (must never break a trait). Report a violation only when a character acts against a trait by more than their strictness allows. Use "hard" when strictness is 0.8 or more.
 Only report new_traits the writer explicitly states about a character's lasting nature, as short list items (jealous, arrogant, loyal to the king), and physical_features the writer states about how a character looks or sounds.
 
@@ -422,6 +425,27 @@ Writer's spoken fragment:
       physical_features: known.flatMap((name) => offlinePhysical(transcript, name).map((w) => ({ character: name, feature: w }))),
       violations: [],
     };
+  }
+
+  // Offline links: when a character comes back after a gap, a character-arc
+  // link joins their last Footstep to this one (at most two per Footstep).
+  function linkCharacterArcs(fs) {
+    const order = mainInOrder();
+    const at = order.findIndex((f) => f.id === fs.id);
+    if (at < 2) return;
+    // Offline, subjects are names spotted in the text, so match them by name or alias.
+    const key = (s) => (character(s)?.name || String(s)).toLowerCase();
+    const names = [...new Set(fs.subjects.map(key))];
+    let added = 0;
+    names.forEach((name) => {
+      if (added >= 2) return;
+      const has = (f) => (f.subjects || []).some((s) => key(s) === name);
+      if (has(order[at - 1])) return; // no gap: story order already joins them
+      const before = order.slice(0, at - 1).reverse().find(has);
+      if (!before || journey.edges.some((e) => e.from === before.id && e.to === fs.id)) return;
+      journey.edges.push({ from: before.id, to: fs.id, type: 'character_arc' });
+      added++;
+    });
   }
 
   // ---------- core pipeline ----------
@@ -524,6 +548,7 @@ Writer's spoken fragment:
       } else {
         placeInOrder(fs.id, anchor);
       }
+      if (!reliable) linkCharacterArcs(fs);
       anchor = fs.id;
     });
 
@@ -1208,7 +1233,8 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       const branch = f.thread === 'branch';
       const m = f.metrics || {};
       const heavy = m.sizeFlag === 'jump';
-      const over = inspecting() && (f.thread === 'main' ? m.dirStatus === 'off' : m.branch === 'terminate');
+      const over = f.thread === 'main' ? m.dirStatus === 'off' : m.branch === 'terminate' && !pathStart(f).ended;
+      const wander = f.thread === 'main' && m.dirStatus === 'wander';
       const intensity = NSMM.intensity(f);
       const status = f.thread === 'main' ? { on: 'on course', wander: 'wandering slightly', off: 'off course' }[m.dirStatus] || '' : 'side path';
       return {
@@ -1223,13 +1249,13 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
         shape: 'dot',
         color: {
           background: branch ? C.branchBg : hasViolation ? C.breakBg : C.bg,
-          border: hasViolation ? C.red : branch || over ? C.amber : heavy ? '#FD3A0A' : C.border,
+          border: hasViolation ? C.red : over || wander ? LILAC : branch ? C.amber : heavy ? '#FD3A0A' : C.border,
           highlight: { background: C.bg, border: '#FD3A0A' },
           hover: { background: C.bg, border: '#FD3A0A' },
         },
-        borderWidth: heavy || over ? 4 : hasViolation || branch ? 3 : 2,
-        // Off course (or a side path past terminancy): a thick outline with a glow.
-        shadow: { enabled: over, color: C.amber, size: 14, x: 0, y: 0 },
+        borderWidth: heavy || over ? 4 : hasViolation || branch || wander ? 3 : 2,
+        // Off course (or a side path past terminancy): a thick lilac outline with a glow.
+        shadow: { enabled: over, color: LILAC, size: 16, x: 0, y: 0 },
         shapeProperties: { borderDashes: branch ? [6, 4] : heavy ? [3, 3] : false },
         font: labelFont(1),
       };
@@ -1248,14 +1274,14 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
           from: e.from,
           to: e.to,
           arrows: { to: { enabled: true, scaleFactor: 0.6 } },
-          color: { color: e.type === 'temporal' ? C.order : EDGE_TYPES[e.type]?.color || '#888', opacity: vecLine ? 0.9 : 0.55 },
-          dashes: e.type === 'casual' || (vecLine && to.thread === 'branch'),
+          color: { color: e.type === 'temporal' ? C.order : EDGE_TYPES[e.type]?.color || '#888', opacity: vecLine ? 0.9 : 0.85 },
+          dashes: vecLine ? to.thread === 'branch' : LINK_DASHES[e.type] || false,
           title: vecLine
             ? inspecting()
               ? `${e.from} → ${e.to}\nDirection ${deg(m.direction ?? 0)}\nMagnitude ${m.magnitude ?? 0}`
               : `${e.from} → ${e.to}`
             : EDGE_TYPES[e.type]?.label,
-          width: vecLine ? 2.5 : e.type === 'cause' ? 1.6 : 1.1,
+          width: vecLine ? 2.5 : e.type === 'cause' ? 2 : 1.7,
           smooth: vecLine ? false : { type: 'curvedCW', roundness: 0.3 },
         };
       });
@@ -2400,9 +2426,9 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     $('#legend').innerHTML =
       '<span class="legend-geo">On course climbs at 35° · the line turns by its direction · line length = magnitude · circle size = intensity · click a link to delete it</span>' +
       Object.values(EDGE_TYPES)
-        .map((t) => `<span><i style="background:${t.color}"></i>${t.label}</span>`)
+        .map((t, i) => `<span><i class="line ${Object.keys(EDGE_TYPES)[i]}" style="--c:${t.color}"></i>${t.label}</span>`)
         .join('') +
-      '<span><i class="ring over"></i>Off course</span><span><i class="ring branch"></i>Side path</span><span><i class="ring heavy"></i>Jump</span><span><i class="ring broken"></i>Trait break</span>';
+      '<span><i class="ring over"></i>Off course</span><span><i class="ring wander"></i>Wandering</span><span><i class="ring branch"></i>Side path</span><span><i class="ring heavy"></i>Jump</span><span><i class="ring broken"></i>Trait break</span>';
     if (!SR) $('#mic-note').textContent = 'Voice needs Chrome or Edge. Typing works everywhere.';
     let mode = 'write';
     try {
