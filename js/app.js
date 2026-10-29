@@ -742,13 +742,13 @@
     const footsteps = j.footsteps.map((f) => ({ ...f, pathStart: f.thread === 'branch' ? pathStart(f).id : null }));
     let out;
     try {
-      out = await NSMM.score({ footsteps, tf: Number.isFinite(j.tf) ? j.tf : null, plannedLength: j.plannedLength, branchShare: j.branchShare, stage: j.stage });
+      out = await NSMM.score({ key: j, footsteps, tf: Number.isFinite(j.tf) ? j.tf : null, plannedLength: j.plannedLength, branchShare: j.branchShare, stage: j.stage });
     } catch (e) {
       setStatus(e.message, 'warn');
       return false;
     }
     if (mine !== scoreRun || journey !== j) return false;
-    j.footsteps.forEach((f) => (f.metrics = out.metrics[f.id] || f.metrics));
+    j.footsteps.forEach((f) => (f.metrics = out.metrics[f.id] ? { ...f.metrics, ...out.metrics[f.id] } : f.metrics));
     j.engine = out.info;
     return true;
   }
@@ -909,7 +909,14 @@
     if (action === 'branch' && fs) makeBranch(fs);
     if (action === 'keep' && fs && fs.thread === 'branch') makeMain(fs);
     if (action === 'archive' && fs) fs.thread = 'archived';
-    if (action === 'end' && fs) pathStart(fs).ended = fs.id;
+    if (action === 'end' && fs) {
+      const start = pathStart(fs);
+      start.ended = fs.id;
+      // The whole side path has ended: its other drift notes go too.
+      journey.alerts
+        .filter((x) => x.open && ['drifting', 'terminate'].includes(x.kind) && fsById(x.fsId) && pathStart(fsById(x.fsId)) === start)
+        .forEach((x) => ((x.open = false), (x.resolution = 'end')));
+    }
     if (action === 'dismiss') journey.driftDismissedAt = journey.footsteps.length;
     if (action === 'relax') {
       const c = character(a.character);
@@ -1071,7 +1078,13 @@
         new_traits: [],
         violations: t.footsteps.flatMap((f, i) => (f.violations || []).map((v) => ({ ...v, footstep: 'NEW' + (i + 1) }))),
       };
-      await addThought(t.transcript, pre);
+      // `after` places a thought out of order or on a side path; `sidePath` branches it off.
+      await addThought(t.transcript, pre, t.after);
+      if (t.sidePath === 'start') {
+        makeBranch(journey.footsteps[journey.footsteps.length - 1]);
+        await relabelStages(false);
+        syncNotes();
+      }
     }
     save();
     go(journey.id);
@@ -1139,10 +1152,17 @@
         const root = branchRoot(f);
         const base = (root && pos[root.id]) || { x, y };
         const k = (fan[root?.id] = (fan[root?.id] || 0) + 1);
-        const s = step(f, f.thread === 'branch' && Math.abs(f.metrics?.direction ?? 0) < 25 ? -35 - 18 * (k - 1) : -18 * (k - 1));
+        const s = step(f, f.thread === 'branch' && Math.abs(f.metrics?.direction ?? 0) < 25 ? -65 - 20 * (k - 1) : -20 * (k - 1));
         pos[f.id] = { x: base.x + s.dx, y: base.y + s.dy };
       });
     return pos;
+  }
+
+  // Fit the whole map with a margin, so labels at the edges are not cut off.
+  function fitMap() {
+    if (!network) return;
+    network.fit({ animation: false });
+    network.moveTo({ scale: network.getScale() * 0.84, animation: false });
   }
 
   function cssVar(name) {
@@ -1163,11 +1183,23 @@
     return { color: cssVar('--node-font'), size: 12 * k, strokeWidth: 4 * k, strokeColor: cssVar('--bg2'), face: 'Manrope, system-ui, sans-serif', vadjust: 2 * k };
   }
 
+  // Labels keep one size on screen. When the map is zoomed out and Footsteps crowd
+  // together, only labels with room around them show; zoom in (or select one) to see the rest.
   function scaleLabels() {
     if (!network || !nodeSet) return;
-    const k = 1 / Math.max(0.05, network.getScale());
-    const font = labelFont(k);
-    nodeSet.update(nodeSet.getIds().map((id) => ({ id, font })));
+    const scale = Math.max(0.05, network.getScale());
+    const font = labelFont(1 / scale);
+    const ids = nodeSet.getIds();
+    const pos = network.getPositions(ids);
+    const room = 46 / scale;
+    const shown = [];
+    const order = [selectedId, ...storyOrder(), ...ids].filter((id, i, all) => id && pos[id] && all.indexOf(id) === i);
+    order.forEach((id) => {
+      const p = pos[id];
+      if (!shown.some((q) => Math.abs(q.x - p.x) < room && Math.abs(q.y - p.y) < room * 0.45)) shown.push({ id, ...p });
+    });
+    const keep = new Set(shown.map((q) => q.id));
+    nodeSet.update(ids.map((id) => ({ id, font, label: keep.has(id) ? id : '' })));
   }
 
   function renderGraph(opts = {}) {
@@ -1203,8 +1235,7 @@
         x: pos[f.id].x,
         y: pos[f.id].y,
         fixed: true,
-        // Short labels keep a long Journey readable: FS#012 shows as 12.
-        label: f.id.replace(/^FS#0*/, ''),
+        label: f.id,
         title: `${num[f.id] ? `#${num[f.id]} · ` : 'Side path · '}${f.id}\n${f.event}\n${status}${m.sizeFlag ? ` · ${m.sizeFlag === 'jump' ? 'Jump' : 'Crawl'}` : ''}`,
         size: 8 + 16 * intensity,
         shape: 'dot',
@@ -1330,14 +1361,14 @@
         ctx.restore();
       });
       network.once('afterDrawing', () => {
-        network.fit({ animation: false });
+        fitMap();
         scaleLabels();
       });
     } else {
       const view = !opts.fit && { position: network.getViewPosition(), scale: network.getScale() };
       network.setData(data);
       if (view) network.moveTo({ ...view, animation: false });
-      else network.fit({ animation: false });
+      else fitMap();
       scaleLabels();
     }
     renderPlaceOptions();
@@ -1388,7 +1419,9 @@
     const main = journey.footsteps.filter((f) => f.thread === 'main');
     const branches = journey.footsteps.filter((f) => f.thread === 'branch');
     const open = journey.alerts.filter((a) => a.open).length;
-    const st = journey.engine?.stats;
+    const scored = main.filter((f) => f.metrics);
+    const avg = (k) => scored.reduce((x, f) => x + (f.metrics[k] ?? 0), 0) / scored.length;
+    const st = scored.length ? { magnitude: avg('magnitude'), intensity: avg('intensity') } : null;
     const count = (fn) => main.filter((f) => f.metrics && fn(f.metrics)).length;
     const off = count((m) => m.dirStatus === 'off');
     const wander = count((m) => m.dirStatus === 'wander');
@@ -1768,8 +1801,10 @@
     selectedId = id;
     renderDetail();
     renderModifier();
-    if (network && fsById(id)?.thread !== 'archived') {
+    // The map may still hold another Journey (e.g. while the sample is built from the home page).
+    if (network && nodeSet?.get(id) && fsById(id)?.thread !== 'archived') {
       network.selectNodes([id]);
+      scaleLabels();
       if (!inspecting()) network.focus(id, { scale: network.getScale(), animation: { duration: 300 } });
     }
     if (inspecting()) {
@@ -1812,7 +1847,7 @@
     } catch {}
     if (network)
       setTimeout(() => {
-        network.fit({ animation: false });
+        fitMap();
         scaleLabels();
       }, 0);
   }
@@ -2029,7 +2064,7 @@
     $('#render').addEventListener('click', () => run(renderDraft));
     $('#fit').addEventListener('click', () => {
       if (!network) return;
-      network.fit({ animation: false });
+      fitMap();
       scaleLabels();
     });
     $('#journey-title').addEventListener('change', (e) => {

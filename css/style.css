@@ -415,6 +415,7 @@ dialog .actions { justify-content: flex-end; margin-top: 16px; }
   .top { flex-wrap: wrap; padding: 10px 16px; }
   .title-input { order: 5; max-width: none; flex-basis: 100%; }
   .rail { font-size: 9px; flex-wrap: wrap; }
+  .rail li:not(.rail-note) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .layout { --gap: 14px; }
   .top { padding: 10px 16px; }
   .rail li.rail-note { flex-basis: 100%; }

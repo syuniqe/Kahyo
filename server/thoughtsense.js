@@ -324,54 +324,296 @@ function monotonicStages(labels) {
 
 // ---------- repetition ----------
 
-// A Footstep that says again what an earlier one said: the same meaning
-// (embeddings this alike) or most of the same content words.
-const REPEAT_MEANING = 0.93;
-const REPEAT_WORDS = 0.7;
+// A Footstep that says again what an earlier one said. Shared words alone are not
+// enough ("Arjun sells the salt" vs "Arjun buys the salt" is a new event), so it takes
+// nearly the same words both ways (overlap over union), a near-identical meaning, or
+// a very close meaning with most words shared.
+const REPEAT_WORDS = 0.8;
+const REPEAT_MEANING = 0.97;
+const REPEAT_CLOSE = 0.93;
+const REPEAT_CLOSE_WORDS = 0.5;
 function repeatOf(fs, earlier) {
-  const mine = new Set(contentWords(fs.event));
+  const mine = fs.words || new Set(contentWords(fs.event));
+  const e = fs.embedding;
   let best = null;
   earlier.forEach((o) => {
-    const theirs = new Set(contentWords(o.event));
-    const shared = [...mine].filter((w) => theirs.has(w)).length;
-    const words = Math.min(mine.size, theirs.size) >= 3 ? shared / Math.min(mine.size, theirs.size) : 0;
-    const meaning = fs.embedding && o.embedding && fs.embedding.length === o.embedding.length ? cosine(fs.embedding, o.embedding) : 0;
-    const score = Math.max(words >= REPEAT_WORDS ? words : 0, meaning >= REPEAT_MEANING ? meaning : 0);
-    if (score && (!best || score > best.similarity)) best = { id: o.id, similarity: round2(score) };
+    const theirs = o.words || new Set(contentWords(o.event));
+    let shared = 0;
+    mine.forEach((w) => theirs.has(w) && shared++);
+    const union = mine.size + theirs.size - shared;
+    const words = union && Math.min(mine.size, theirs.size) >= 2 ? shared / union : 0;
+    // Offline vectors (256 numbers) are only hashed words, so meaning is judged on real embeddings only.
+    const meaning = e && o.embedding && e.length === o.embedding.length && e.length >= 512 ? cosine(e, o.embedding) : 0;
+    const alike = words >= REPEAT_WORDS || meaning >= REPEAT_MEANING || (meaning >= REPEAT_CLOSE && words >= REPEAT_CLOSE_WORDS);
+    const score = Math.max(words, meaning);
+    if (alike && (!best || score > best.similarity)) best = { id: o.id, similarity: round2(score) };
   });
   return best;
 }
 
 // ---------- the whole Journey ----------
 
+// The browser sends vectors as base64 float32 (`e64`): about a third of the JSON size.
+function decodeVector(raw) {
+  if (typeof raw.e64 === 'string' && raw.e64) {
+    try {
+      const bin = atob(raw.e64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return Array.from(new Float32Array(bytes.buffer, 0, bytes.length >> 2));
+    } catch {
+      return null;
+    }
+  }
+  return raw.embedding;
+}
+
+// Clean inputs: a vector with a bad number, or no length, counts as no vector.
+function cleanVector(e) {
+  if (!Array.isArray(e) || !e.length) return null;
+  let n = 0;
+  for (let k = 0; k < e.length; k++) {
+    const x = e[k];
+    if (typeof x !== 'number' || !Number.isFinite(x)) return null;
+    n += x * x;
+  }
+  if (n < 1e-18) return null;
+  n = Math.sqrt(n);
+  const u = new Float64Array(e.length);
+  for (let k = 0; k < e.length; k++) u[k] = e[k] / n;
+  return u;
+}
+
+function dotF(a, b) {
+  let s = 0;
+  for (let k = 0; k < a.length; k++) s += a[k] * b[k];
+  return s;
+}
+
+const num = (x, fallback) => (x === null || x === undefined || x === '' || !Number.isFinite(Number(x)) ? fallback : Number(x));
+
+// The main thread as it grows, one per vector size, kept as dot products so each
+// new Footstep costs one pass over the earlier ones. Gives the same G, R, H,
+// baseline, mean and principal axis as thread() and storyAxis() above.
+function threadState() {
+  return { X: [], K: [], rowSum: [], total: 0, kept: [], g: null, r: null, a: null };
+}
+
+function addToThread(st, e, dots) {
+  const n = st.X.length;
+  st.X.push(e);
+  for (let i = 0; i < n; i++) {
+    st.K[i].push(dots[i]);
+    st.rowSum[i] += dots[i];
+  }
+  const row = dots.slice(0, n);
+  row.push(1);
+  st.K.push(row);
+  st.rowSum.push(row.reduce((a, x) => a + x, 0));
+  st.total = st.rowSum.reduce((a, x) => a + x, 0);
+  if (!st.g) {
+    st.g = new Float64Array(e.length);
+    st.r = new Float64Array(e.length);
+  }
+  for (let k = 0; k < e.length; k++) {
+    st.g[k] += e[k];
+    st.r[k] = RECENCY * st.r[k] + e[k];
+  }
+  if (!st.kept.some((i) => st.K[i][n] > DUPLICATE)) st.kept.push(n);
+  st.a = null;
+}
+
+// Signed direction of `e` (unit) against the thread, from its dot products with the thread.
+function deviationFrom(st, e, dots) {
+  const n = st.X.length;
+  if (st.kept.length < MIN_TO_JUDGE) return { degrees: 0, stray: 0, z: 0 };
+  // Heading H = unit(½·unit(g) + ½·unit(r)).
+  const gg = st.total;
+  const gn = Math.sqrt(gg);
+  const rn = Math.sqrt(dotF(st.r, st.r));
+  const gr = dotF(st.g, st.r);
+  let eg = 0;
+  let er = 0;
+  for (let i = 0; i < n; i++) {
+    eg += dots[i];
+    er += Math.pow(RECENCY, n - 1 - i) * dots[i];
+  }
+  const hx = (1 - RECENT_SHARE) * (eg / gn) + RECENT_SHARE * (er / rn);
+  const hn = Math.sqrt((1 - RECENT_SHARE) ** 2 + RECENT_SHARE ** 2 + 2 * (1 - RECENT_SHARE) * RECENT_SHARE * (gr / (gn * rn)));
+  const stray = 1 - hx / hn;
+  // Baseline: median leave-one-out distance of the last kept Footsteps.
+  const from = Math.max(0, st.kept.length - BASELINE_WINDOW);
+  const dist = st.kept.slice(from).map((i) => {
+    const eDotRest = st.rowSum[i] - 1;
+    const restNorm = Math.sqrt(Math.max(0, gg - 2 * st.rowSum[i] + 1));
+    return 1 - (restNorm === 0 ? 0 : eDotRest / restNorm);
+  });
+  const baseline = Math.max(median(dist), 0.02);
+  const z = stray / baseline;
+  const side = sideOf(st, dots);
+  const size = clamp(((z - NOISE) / (2 - NOISE)) * 90, 0, 180);
+  return { degrees: side < 0 ? -size : size, stray, z };
+}
+
+// Which side of the story's principal axis: the same power iteration as storyAxis(),
+// run on the centred dot-product matrix (n × n) instead of the vectors (n × dim).
+function sideOf(st, dots) {
+  const n = st.X.length;
+  const rm = st.rowSum.map((x) => x / n);
+  const tm = st.total / (n * n);
+  if (!st.a) {
+    const C = new Float64Array(n * n);
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) C[i * n + j] = st.K[i][j] - rm[i] - rm[j] + tm;
+    // Coefficients of the axis on the centred Footsteps; their scale does not change the axis.
+    // Start from the last Footstep, or from the axis found one Footstep ago, which is
+    // nearly the answer already, so a growing story needs only a few rounds.
+    let a = new Float64Array(n);
+    const warm = st.prevA && st.prevA.length === n - 1;
+    if (warm) a.set(st.prevA);
+    else a[n - 1] = 1;
+    for (let it = 0; it < (warm ? 10 : 40); it++) {
+      const next = new Float64Array(n);
+      let len = 0;
+      for (let i = 0; i < n; i++) {
+        let s = 0;
+        const row = i * n;
+        for (let j = 0; j < n; j++) s += C[row + j] * a[j];
+        next[i] = s;
+        len += s * s;
+      }
+      len = Math.sqrt(len);
+      if (len < 1e-12) break;
+      let change = 0;
+      for (let i = 0; i < n; i++) {
+        next[i] /= len;
+        change = Math.max(change, Math.abs(next[i] - a[i]));
+      }
+      a = next;
+      if (change < 1e-6) break;
+    }
+    // Oriented so the opening Footstep sits on the − side.
+    let first = 0;
+    for (let j = 0; j < n; j++) first += C[j] * a[j];
+    if (first > 0) a = a.map((x) => -x);
+    st.a = a;
+    st.prevA = a;
+  }
+  let eMean = 0;
+  for (let i = 0; i < n; i++) eMean += dots[i];
+  eMean /= n;
+  let side = 0;
+  for (let i = 0; i < n; i++) side += st.a[i] * (dots[i] - eMean - (rm[i] - tm));
+  return side;
+}
+
 // Scores every Footstep in writing order, each against the main thread as it
 // stood before it. A side-path Footstep's intent vector is measured from the
 // direction its path started at (pathStart: the id of its path's first Footstep).
 // footsteps: [{ id, thread, stage, pathStart, event, context, subjects, promises, environment, intensity, embedding }]
-function scoreJourney({ footsteps = [], tf = null, plannedLength = DEFAULT_PLANNED_LENGTH, branchShare = DEFAULT_BRANCH_SHARE, stage = null }) {
+function scoreJourney(input = {}) {
+  const footsteps = Array.isArray(input.footsteps) ? input.footsteps : [];
+  const plannedLength = clamp(Math.round(num(input.plannedLength, DEFAULT_PLANNED_LENGTH)), 1, 1000);
+  const branchShare = clamp(num(input.branchShare, DEFAULT_BRANCH_SHARE), 0.05, 1);
   const autoTf = autoTerminancy(plannedLength);
-  const t = Number.isFinite(tf) ? clamp(tf, 0.1, 1) : autoTf;
-  const prior = [];
+  const tf = input.tf === null || input.tf === undefined ? autoTf : clamp(num(input.tf, autoTf), 0.1, 1);
+  const states = {};
+  const mainSizes = [];
   const seen = [];
   const metrics = {};
-  footsteps.forEach((f) => {
+  let lastDim = null;
+  // Footsteps before `from` were scored before and have not changed: they only build the
+  // thread, and their earlier results (`known`: direction and magnitude) seed side paths.
+  const startAt = clamp(Math.round(num(input.from, 0)), 0, footsteps.length);
+  footsteps.forEach((raw, index) => {
+    const f = { ...raw, subjects: list(raw.subjects), promises: list(raw.promises), environment: list(raw.environment), event: String(raw.event || '') };
+    const e = cleanVector(decodeVector(raw));
+    if (index < startAt) {
+      // Their direction and size stand; the factors may have moved, so their status is redone.
+      const k = raw.known || {};
+      const direction = num(k.direction, 0);
+      const m0 = num(k.magnitude, magnitude(f));
+      const limit = directionLimit(tf, f.stage);
+      const abs = Math.abs(direction);
+      const back = f.thread === 'branch' && f.pathStart && f.pathStart !== f.id ? metrics[f.pathStart] : null;
+      const part = {
+        direction,
+        magnitude: m0,
+        limit,
+        dirStatus: !k.judged ? 'on' : abs > limit ? 'off' : abs > limit / 2 ? 'wander' : 'on',
+        iv: intentVector(m0, direction - (back?.direction ?? direction), back?.magnitude ?? m0),
+      };
+      if (f.thread === 'branch') part.branch = branchState(part.iv.length, tf, branchShare);
+      metrics[f.id] = part;
+      if (f.thread === 'main') {
+        mainSizes.push(magnitude(f));
+        if (e) {
+          if (!states[e.length]) states[e.length] = threadState();
+          const s0 = states[e.length];
+          addToThread(s0, e, s0.X.map((x) => dotF(x, e)));
+          s0.prevA = null;
+          lastDim = e.length;
+        }
+      }
+      if (f.thread !== 'archived') seen.push({ id: f.id, event: f.event, words: new Set(contentWords(f.event)), embedding: e });
+      return;
+    }
+    const dim = e ? e.length : lastDim;
+    const st = dim && states[dim];
+    const n = st ? st.X.length : 0;
+    const dots = e && st ? st.X.map((x) => dotF(x, e)) : [];
+    const m = magnitude(f);
+    const avgMagnitude = median(mainSizes);
+    const judged = mainSizes.length >= MIN_TO_JUDGE && (st ? st.kept.length : 0) >= MIN_TO_JUDGE;
+    const dev = judged && e && n ? deviationFrom(st, e, dots) : { degrees: 0, stray: 0, z: 0 };
+    const limit = directionLimit(tf, f.stage);
+    const abs = Math.abs(dev.degrees);
+    let sizeFlag = null;
+    if (judged && avgMagnitude > 0) {
+      if (m > JUMP * avgMagnitude) sizeFlag = 'jump';
+      else if (m < CRAWL * avgMagnitude) sizeFlag = 'crawl';
+    }
     const from = f.thread === 'branch' && f.pathStart && f.pathStart !== f.id ? metrics[f.pathStart] : null;
-    const m = scoreFootstep(f, prior, { tf: t, stage: f.stage, rootDirection: from?.direction, rootMagnitude: from?.magnitude });
-    if (f.thread === 'branch') m.branch = branchState(m.iv.length, t, branchShare);
-    m.repeat = f.thread === 'archived' ? null : repeatOf(f, seen);
-    metrics[f.id] = m;
-    if (f.thread === 'main') prior.push(f);
-    if (f.thread !== 'archived') seen.push(f);
+    const out = {
+      magnitude: m,
+      intensity: intensity(f),
+      direction: dev.degrees,
+      angle: (dev.degrees + 360) % 360,
+      stray: dev.stray,
+      spread: dev.z,
+      avgMagnitude,
+      limit,
+      dirStatus: !judged ? 'on' : abs > limit ? 'off' : abs > limit / 2 ? 'wander' : 'on',
+      judged,
+      sizeFlag,
+      iv: intentVector(m, dev.degrees - (from?.direction ?? dev.degrees), from?.magnitude ?? m),
+    };
+    if (f.thread === 'branch') out.branch = branchState(out.iv.length, tf, branchShare);
+    const words = new Set(contentWords(f.event));
+    out.repeat = f.thread === 'archived' ? null : repeatOf({ event: f.event, words, embedding: e }, seen);
+    metrics[f.id] = out;
+    if (f.thread === 'main') {
+      mainSizes.push(m);
+      if (e) {
+        if (!states[e.length]) states[e.length] = threadState();
+        const s2 = states[e.length];
+        addToThread(s2, e, s2 === st ? dots : s2.X.map((x) => dotF(x, e)));
+        lastDim = e.length;
+      }
+    }
+    if (f.thread !== 'archived') seen.push({ id: f.id, event: f.event, words, embedding: e });
   });
-  const main = footsteps.filter((f) => f.thread === 'main').map((f) => ({ metrics: metrics[f.id] }));
   return {
     metrics,
-    info: { tf: t, autoTf, limit: directionLimit(t, stage), stageAfter: stageLabelAfter(plannedLength), stats: threadStats(main) },
+    info: { tf, autoTf, limit: directionLimit(tf, input.stage), stageAfter: stageLabelAfter(plannedLength) },
   };
 }
 
+const list = (xs) => (Array.isArray(xs) ? xs.filter((x) => x !== null && x !== undefined).map(String) : typeof xs === 'string' && xs ? [xs] : []);
+
 // Where stage labels stand for a main thread of `count` Footsteps.
-function stagesFor({ count = 0, plannedLength = DEFAULT_PLANNED_LENGTH }) {
+function stagesFor(input = {}) {
+  const plannedLength = clamp(Math.round(num(input.plannedLength, DEFAULT_PLANNED_LENGTH)), 1, 1000);
+  const count = clamp(Math.round(num(input.count, 0)), 0, 5000);
   return { after: stageLabelAfter(plannedLength), labels: heuristicStages(count, plannedLength) };
 }
 

@@ -129,3 +129,31 @@ test('scoreJourney measures a side path from its first Footstep', () => {
   assert.ok(out.metrics.B1.iv.length < 0.1);
   assert.ok(['ok', 'drifting', 'terminate'].includes(out.metrics.B2.branch));
 });
+
+test('scoring only the changed tail gives the same results as scoring everything', () => {
+  const steps = steady(25).map((f, i) => ({ ...f, id: 'T' + i, thread: 'main', event: 'beat ' + i + ' of the story with salt and road' }));
+  steps.push({ ...fs(vec()), id: 'T25', thread: 'main', event: 'a dragon sings on the moon' });
+  const all = N.scoreJourney({ footsteps: steps });
+  const known = steps.map((f, i) => (i < 20 ? { ...f, known: { direction: all.metrics[f.id].direction, magnitude: all.metrics[f.id].magnitude, judged: all.metrics[f.id].judged } } : f));
+  const tail = N.scoreJourney({ footsteps: known, from: 20 });
+  assert.strictEqual(tail.metrics.T3.dirStatus, all.metrics.T3.dirStatus);
+  for (let i = 20; i < 26; i++) {
+    assert.strictEqual(tail.metrics['T' + i].dirStatus, all.metrics['T' + i].dirStatus);
+    assert.ok(Math.abs(tail.metrics['T' + i].direction - all.metrics['T' + i].direction) < 1, `T${i}`);
+  }
+});
+
+test('the fast whole-Journey scorer agrees with the step-by-step reference', () => {
+  const steps = steady(30, 1.0).map((f, i) => ({ ...f, id: 'R' + i, thread: 'main', event: 'r' + i + ' beat ' + i }));
+  for (let i = 0; i < 4; i++) steps.splice(8 + i * 5, 0, { ...fs(vec()), id: 'X' + i, thread: 'main', event: 'tangent ' + i });
+  const fast = N.scoreJourney({ footsteps: steps, tf: 0.35 });
+  const prior = [];
+  let agree = 0;
+  steps.forEach((f) => {
+    const ref = N.scoreFootstep(f, prior, { tf: 0.35 });
+    const got = fast.metrics[f.id];
+    if (ref.dirStatus === got.dirStatus && Math.abs(Math.abs(ref.direction) - Math.abs(got.direction)) < 0.5) agree++;
+    prior.push(f);
+  });
+  assert.ok(agree >= steps.length - 1, `${agree}/${steps.length} agree`);
+});

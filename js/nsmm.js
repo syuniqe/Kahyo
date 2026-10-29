@@ -49,8 +49,14 @@
     return v.map((x) => x / n);
   }
 
-  // Vectors go to the server rounded: smaller requests, same results.
-  const slim = (e) => (Array.isArray(e) ? e.map((x) => Math.round(x * 1e5) / 1e5) : null);
+  // Vectors go to the server as base64 float32: a third of the size, same results.
+  function pack(e) {
+    if (!Array.isArray(e) || !e.length) return null;
+    const bytes = new Uint8Array(Float32Array.from(e).buffer);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
 
   async function call(body) {
     let res;
@@ -64,28 +70,54 @@
     return data;
   }
 
-  // journey: { footsteps: [...with pathStart], tf, plannedLength, branchShare, stage } → { metrics: {id: …}, info }
-  function score(j) {
-    return call({
+  // What the server needs from each Footstep, packed once per change.
+  const packed = new WeakMap();
+  function wire(f) {
+    const e = packed.get(f.embedding || f);
+    const e64 = e !== undefined ? e : pack(f.embedding);
+    if (e === undefined) packed.set(f.embedding || f, e64);
+    return {
+      id: f.id,
+      thread: f.thread,
+      stage: f.stage || null,
+      pathStart: f.pathStart || null,
+      event: f.event,
+      context: f.context || '',
+      subjects: f.subjects || [],
+      promises: f.promises || [],
+      environment: f.environment || [],
+      intensity: Number.isFinite(f.intensity) ? f.intensity : null,
+      e64,
+    };
+  }
+
+  // Only Footsteps from the first one that changed since the last score are re-scored;
+  // the ones before it just rebuild the thread on the server.
+  const lastSent = new WeakMap();
+  // j: { footsteps: [...with pathStart], tf, plannedLength, branchShare, stage } → { metrics: {id: …}, info }
+  async function score(j, { full = false } = {}) {
+    const items = j.footsteps.map(wire);
+    // A stage change only moves the limit, which the server redoes anyway, so it is left out.
+    const sig = items.map(({ stage, ...x }) => JSON.stringify(x));
+    const key = j.key || j;
+    const prev = lastSent.get(key);
+    // The factors (TF, planned length, branching share) only change statuses, which the
+    // server redoes for every Footstep, so they never force a full re-score.
+    let from = 0;
+    if (!full && prev) {
+      while (from < sig.length && from < prev.sig.length && sig[from] === prev.sig[from] && j.footsteps[from].metrics && 'judged' in j.footsteps[from].metrics) from++;
+    }
+    const out = await call({
       op: 'score',
       tf: j.tf,
       plannedLength: j.plannedLength,
       branchShare: j.branchShare,
       stage: j.stage,
-      footsteps: j.footsteps.map((f) => ({
-        id: f.id,
-        thread: f.thread,
-        stage: f.stage,
-        pathStart: f.pathStart,
-        event: f.event,
-        context: f.context,
-        subjects: f.subjects,
-        promises: f.promises,
-        environment: f.environment,
-        intensity: f.intensity,
-        embedding: slim(f.embedding),
-      })),
+      from,
+      footsteps: items.map((x, i) => (i < from ? { ...x, known: { direction: j.footsteps[i].metrics.direction, magnitude: j.footsteps[i].metrics.magnitude, judged: j.footsteps[i].metrics.judged } } : x)),
     });
+    lastSent.set(key, { sig });
+    return out;
   }
 
   // → { after: how many main Footsteps before stages are labelled, labels: by position }
