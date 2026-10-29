@@ -1113,9 +1113,9 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     renderBadge();
   }
 
-  // On screen an on-course story climbs at 45°, up and to the right; each Footstep's
+  // On screen an on-course story climbs at 35°, up and to the right; each Footstep's
   // signed direction turns its line from that climb (+ up and back, − flat or down).
-  const CLIMB = 45;
+  const CLIMB = 35;
   function heading(f) {
     return CLIMB + (f.metrics?.direction ?? 0);
   }
@@ -2398,7 +2398,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
   function init() {
     migrate();
     $('#legend').innerHTML =
-      '<span class="legend-geo">On course climbs at 45° · the line turns by its direction · line length = magnitude · circle size = intensity · click a link to delete it</span>' +
+      '<span class="legend-geo">On course climbs at 35° · the line turns by its direction · line length = magnitude · circle size = intensity · click a link to delete it</span>' +
       Object.values(EDGE_TYPES)
         .map((t) => `<span><i style="background:${t.color}"></i>${t.label}</span>`)
         .join('') +

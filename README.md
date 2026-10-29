@@ -56,6 +56,6 @@ Your Journey and API key stay in your browser. When a key is set, transcripts ar
 - **Home** lists every Journey saved in this browser (no sign-in yet).
 - **Write**: speak, the story map (a click only highlights a Footstep), a story-health pill, and the right pane with **Notes** (they stay until you clear them) and **Draft**. The pane folds away with ».
 - **Inspect**: the right pane becomes **Footstep** (the selected Footstep, its values and notes) and **Storyline** (terminancy factor, branching share, planned length, stats).
-- **Graph**: on course climbs at 45°; each Footstep's line turns from that by its direction, its length is the magnitude, its circle size the intensity. Side paths are dashed.
+- **Graph**: on course climbs at 35°; each Footstep's line turns from that by its direction, its length is the magnitude, its circle size the intensity. Side paths are dashed.
 - **AI**: any provider (Gemini, Groq, OpenAI, OpenRouter or another OpenAI-compatible API). Embeddings come from Gemini, or offline ones.
 - While Kahyo works, the logo scribbles itself in the map's bottom-right corner.

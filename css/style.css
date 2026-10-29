@@ -180,10 +180,10 @@ body.busy .scribble { visibility: visible; }
 
 /* journey view */
 .journey-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.rail { flex: 1 1 100%; display: flex; list-style: none; margin: 0; padding: 0; gap: 6px; font-size: 12.5px; }
-.rail li { flex: 1; text-align: center; padding: 6px 0 0; white-space: nowrap; color: var(--muted); border-top: 3px solid var(--border2-solid); }
+.rail { flex: 1 1 100%; display: flex; flex-wrap: wrap; row-gap: 4px; list-style: none; margin: 0; padding: 0; gap: 6px; font-size: 12.5px; }
+.rail li { flex: 1 1 0; text-align: center; padding: 6px 0 0; white-space: nowrap; color: var(--muted); border-top: 3px solid var(--border2-solid); }
 .rail li.pending { opacity: 0.45; }
-.rail li.rail-note { flex: 2.4; border-color: transparent; opacity: 1; }
+.rail li.rail-note { flex: 1 1 100%; border-color: transparent; opacity: 1; padding-top: 0; }
 .rail li.done { color: var(--ink-dim); border-color: var(--head); opacity: 0.65; }
 .rail li.now { color: var(--brand); border-color: var(--brand); font-weight: 600; }
 .planned { display: flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; margin: 0 auto; }
@@ -201,7 +201,7 @@ body.busy .scribble { visibility: visible; }
 .card { background: var(--card); border: 1px solid var(--border2-solid); border-radius: var(--radius); padding: 22px; }
 .left { position: relative; }
 .left .speak { flex: 0 1 auto; overflow: auto; display: flex; flex-direction: column; }
-.left .speak textarea { flex: none; height: 264px; min-height: 120px; }
+.left .speak textarea { flex: none; height: 150px; min-height: 96px; }
 
 /* characters: a bar that pops up */
 .char-dock { position: relative; flex: none; margin-top: auto; }
@@ -252,7 +252,7 @@ body.busy .scribble { visibility: visible; }
 .mic svg { width: 22px; height: 22px; }
 .mic.live { background: var(--red); animation: pulse 1.4s infinite; }
 @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(200, 67, 63, 0.5); } 50% { box-shadow: 0 0 0 8px rgba(200, 67, 63, 0); } }
-textarea { width: 100%; resize: vertical; font: 15px/1.5 var(--font); margin-bottom: 10px; }
+textarea { width: 100%; resize: vertical; font: 14.5px/1.55 var(--font); margin-bottom: 10px; }
 #add { width: 100%; padding: 10px; }
 .place { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--muted); }
 .place select { flex: 1; min-width: 0; width: 100%; font-size: 12px; }
@@ -350,8 +350,8 @@ div.vis-tooltip { background: var(--card) !important; color: var(--ink) !importa
 .pill.branch { color: var(--amber); }
 .field { display: flex; flex-direction: column; gap: 6px; margin: 0 0 14px; }
 .field > span { font-size: 12.5px; font-weight: 600; color: var(--muted); }
-.field textarea { margin: 0; font-size: 14px; }
-.field input { font-size: 14px; }
+.field textarea { margin: 0; }
+.field input { font-size: 14.5px; }
 .iv-line { margin: 2px 0; font-size: 13px; }
 .more { margin-bottom: 10px; }
 .more .field { margin-top: 8px; }
@@ -470,7 +470,7 @@ body.mode-inspect .mword { display: block; }
 .ndot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); flex: none; }
 .alert.note.trait .ndot { background: var(--red); }
 .alert.note.trait.soft .ndot { background: var(--amber); }
-.alert.note p { color: var(--ink-dim); font-size: 14px; }
+.alert.note p { color: var(--ink-dim); }
 .alert.note .actions button { background: transparent; border: 1px solid var(--border2-solid); }
 .alert.note .actions button:hover { border-color: var(--head); }
 .tab .count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 4px; border-radius: 99px; background: var(--amber); color: #1d1206; font-size: 11px; font-weight: 700; }
@@ -533,6 +533,3 @@ body.pane-closed .pane-open { display: flex; }
 .readout dd.warn { color: var(--amber); }
 .fs-notes { margin-top: 12px; }
 dialog label[hidden] { display: none; }
-
-/* Typing space: room to read and correct what the mic heard */
-#transcript { min-height: 9rem; line-height: 1.55; resize: vertical; font-size: 1rem; }
