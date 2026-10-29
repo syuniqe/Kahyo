@@ -192,7 +192,7 @@ window.KAHYO_SAMPLE = {
     },
     {
       transcript:
-        'Then the climax: the march reaches the coast, Meera refuses Hale and leads the village onto the salt pans to make salt in front of the soldiers.',
+        'Then the ending: the march reaches the coast, Meera refuses Hale and leads the village onto the salt pans to make salt in front of the soldiers.',
       footsteps: [
         {
           event: 'Meera refuses Hale and leads the village onto the guarded salt pans to make salt in defiance',

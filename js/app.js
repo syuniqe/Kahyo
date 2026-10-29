@@ -74,8 +74,10 @@
       }
       c.traits.forEach((t) => delete t.level);
     });
+    if (j.stage) j.stage = NSMM.stageName(j.stage);
     j.footsteps.forEach((f) => {
       if (f.stage === undefined) f.stage = null;
+      if (f.stage) f.stage = NSMM.stageName(f.stage);
       f.violations = f.violations || [];
       if (!f.environment) f.environment = f.world_rules || [];
       delete f.world_rules;
@@ -339,6 +341,7 @@
 
   const EXTRACT_SCHEMA = `{
   "footsteps": [{
+    "events_count": how many separate story events this Footstep holds (1 if it is one step),
     "event": "the writer's own words for this Footstep, with only grammar and filler fixed (change under 5% of the words; never paraphrase or summarise)",
     "subjects": ["canonical character or entity names involved"],
     "context": "when and in what circumstances, if the writer said",
@@ -369,7 +372,7 @@
       })
       .join('\n');
     return `You are the extraction layer of Kahyo, a voice-first storytelling system based on the Wordwalk Model, a Narrative Storyline Mapping Model (NSMM), and its ThoughtSense Engine.
-A writer just spoke a fragment of their story out loud. Split it into Footsteps: atomic story steps, each one meaningful advancement. Usually 1-4 per fragment.
+A writer just spoke a fragment of their story out loud. Turn it into exactly ONE Footstep, however many sentences it has. Never split it: the writer decides that. Instead, set events_count to the number of separate story events it holds.
 The event is the writer's own words. Keep their wording; fix only grammar and drop filler ("um", "so basically"). Do not summarise, shorten or rephrase.
 Writers speak out of order. Decide where the new Footsteps belong in the story's timeline and set place_after. Use END unless the writer signals otherwise (e.g. "before the king...", "earlier,", "at the start", "back in step 2") or the content clearly happens earlier. Use the story so far to understand pronouns and references.
 Characters: use one canonical name per person. When the writer reveals that a description or second name is someone already known (e.g. "the prince's wife" is Rita, or Arjun's father turns out to be Krishna), add it to aliases and use the canonical name in subjects.
@@ -397,19 +400,22 @@ Writer's spoken fragment:
       .filter((s) => s.split(/\s+/).length >= 4);
     const known = journey.characters.map((c) => c.name);
     const skip = new Set(['The', 'Then', 'So', 'And', 'But', 'What', 'When', 'She', 'He', 'They', 'It', 'In', 'On', 'At', 'This', 'That', 'Her', 'His', 'I', 'We', 'Maybe', 'Just']);
+    // One idea is one Footstep; each sentence that says something counts as an event.
+    const text = transcript.trim().replace(/^(so|and|then|okay|um|uh)[,\s]+/i, '');
+    const caps = sentences.flatMap((s) => (s.slice(1).match(/\b[A-Z][a-z]+\b/g) || []).filter((w) => !skip.has(w)));
+    const subjects = [...new Set([...known.filter((k) => transcript.includes(k)), ...caps])].slice(0, 6);
     return {
-      footsteps: sentences.map((s) => {
-        const caps = (s.slice(1).match(/\b[A-Z][a-z]+\b/g) || []).filter((w) => !skip.has(w));
-        const subjects = [...new Set([...known.filter((k) => s.includes(k)), ...caps])].slice(0, 4);
-        return {
-          event: s.replace(/^(so|and|then|okay|um|uh)[,\s]+/i, ''),
+      footsteps: [
+        {
+          event: text[0] ? text[0].toUpperCase() + text.slice(1) : text,
+          events_count: Math.max(1, sentences.length),
           subjects,
           context: '',
           environment: [],
           promises: [],
           seeds: [],
-        };
-      }),
+        },
+      ],
       place_after: 'END',
       aliases: [],
       new_traits: [],
@@ -424,7 +430,24 @@ Writer's spoken fragment:
     transcript = transcript.trim();
     if (!transcript) return;
     const extracted = preExtracted || (LLM.hasKey() ? await LLM.generateJSON(extractPrompt(transcript), EXTRACT_SCHEMA) : offlineExtract(transcript));
-    const items = (extracted.footsteps || []).filter((f) => f && f.event);
+    let items = (extracted.footsteps || []).filter((f) => f && f.event);
+    // A spoken idea becomes one Footstep. If the AI returned several anyway, join them.
+    if (!preExtracted && items.length > 1) {
+      const all = (k) => items.flatMap((x) => x[k] || []);
+      items = [
+        {
+          ...items[0],
+          event: items.map((x) => x.event).join(' '),
+          events_count: items.reduce((n, x) => n + (Number(x.events_count) || 1), 0),
+          subjects: [...new Set(all('subjects'))],
+          environment: [...new Set(all('environment'))],
+          promises: all('promises'),
+          seeds: all('seeds').filter((sd) => !/^NEW/i.test(String(sd.target))),
+          context: items.map((x) => x.context).filter(Boolean).join('; '),
+          intensity: Math.max(...items.map((x) => Number(x.intensity) || 0)),
+        },
+      ];
+    }
     if (!items.length) {
       setStatus('No Footsteps found in that fragment. Try saying what happens.', 'warn');
       return;
@@ -480,6 +503,8 @@ Writer's spoken fragment:
         thread: onBranch ? 'branch' : 'main',
         violations: [],
       };
+      const events = Number(raw.events_count);
+      if (Number.isFinite(events) && events > 1) fs.events = Math.round(events);
       const ai = Number(raw.intensity ?? raw.plot_intensity);
       if (reliable && Number.isFinite(ai)) fs.intensity = clamp(ai, 0, 1);
       if (reliable) fs.subjects.forEach(ensureCharacter);
@@ -544,6 +569,13 @@ Writer's spoken fragment:
       .filter((f) => f.metrics && f.thread !== 'archived' && (!ids || ids.includes(f.id)))
       .forEach((f) => {
         const m = f.metrics;
+        if (f.events > 1)
+          addNote({
+            kind: 'split',
+            fsId: f.id,
+            text: `${f.id} may hold ${f.events} Footsteps in one. Split it, or keep it as one?`,
+            maths: `${f.events} events`,
+          });
         if (f.thread === 'main') {
           if (m.dirStatus === 'off')
             addNote({
@@ -689,14 +721,14 @@ Stages, in order:
 - Pandiculation: the story stretches open: the inciting event and new threads.
 - Maxspan: the widest point: most threads open, complications peak.
 - Convergence: threads pull together toward the end.
-- Climax: the decisive confrontation and its resolution.
+- Conclusion: the decisive confrontation and its resolution; the story closes.
 Label every Footstep. Stages only move forward through the list. Do not use a stage the story has not reached yet.
 
 Footsteps in story order:
 ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
-      '{"stages":[{"id":"FS#001","stage":"Origin|Pandiculation|Maxspan|Convergence|Climax"}]}'
+      '{"stages":[{"id":"FS#001","stage":"Origin|Pandiculation|Maxspan|Convergence|Conclusion"}]}'
     );
-    const byId = Object.fromEntries((res.stages || []).map((s) => [s.id, s.stage]));
+    const byId = Object.fromEntries((res.stages || []).map((s) => [s.id, NSMM.stageName(s.stage)]));
     let prev = NSMM.STAGES[0];
     return main.map((f) => (prev = NSMM.STAGES.includes(byId[f.id]) ? byId[f.id] : prev));
   }
@@ -787,7 +819,12 @@ ${main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
     else journey.edges.push({ from: f.id, to: g.id, type: 'temporal' });
     await reembed(f);
     await reembed(g);
-    journey.alerts.filter((a) => (a.kind === 'jump' || a.kind === 'heavy') && a.fsId === f.id).forEach((a) => ((a.open = false), (a.resolution = 'split')));
+    journey.alerts.filter((a) => ['jump', 'heavy', 'split'].includes(a.kind) && a.fsId === f.id).forEach((a) => ((a.open = false), (a.resolution = 'split')));
+    // What was left over may still hold more than one event; the writer can split again.
+    const left = Math.max(1, (f.events || 2) - 1);
+    delete f.events;
+    if (left > 1) g.events = left;
+    else delete g.events;
     await relabelStages(false);
     syncNotes([g.id]);
     save();
@@ -1076,10 +1113,11 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     renderBadge();
   }
 
-  // The line's angle from 0° (pointing right): the Footstep's signed direction
-  // against the thread, so an on-course story runs left to right.
+  // On screen an on-course story climbs at 45°, up and to the right; each Footstep's
+  // signed direction turns its line from that climb (+ up and back, − flat or down).
+  const CLIMB = 45;
   function heading(f) {
-    return f.metrics?.direction ?? 0;
+    return CLIMB + (f.metrics?.direction ?? 0);
   }
 
   function segLength(f) {
@@ -1115,7 +1153,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
         const root = branchRoot(f);
         const base = (root && pos[root.id]) || { x, y };
         const k = (fan[root?.id] = (fan[root?.id] || 0) + 1);
-        const s = step(f, f.thread === 'branch' && Math.abs(heading(f)) < 25 ? -35 - 18 * (k - 1) : -18 * (k - 1));
+        const s = step(f, f.thread === 'branch' && Math.abs(f.metrics?.direction ?? 0) < 25 ? -35 - 18 * (k - 1) : -18 * (k - 1));
         pos[f.id] = { x: base.x + s.dx, y: base.y + s.dy };
       });
     return pos;
@@ -1486,6 +1524,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
 
   const NOTE_TITLES = {
     off: 'Off course',
+    split: 'May be two Footsteps',
     wander: 'Wandering slightly',
     jump: 'Jump',
     crawl: 'Crawl',
@@ -1504,6 +1543,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       case 'off':
         return fs?.thread === 'main' ? b('branch', 'Branch it') + b('accept', 'Keep on the main story') : b('accept', 'Clear');
       case 'jump':
+      case 'split':
         return b('split', 'Split in two') + b('accept', 'Keep as one');
       case 'terminate':
         return b('end', 'Let it end here') + b('change', 'Change its steps') + b('accept', 'Keep going');
@@ -1733,13 +1773,19 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
       .join('');
   }
 
+  // Write keeps the map calm: a click only highlights the Footstep. Inspect opens its pane.
   function selectFootstep(id) {
     selectedId = id;
     renderDetail();
     renderModifier();
-    if (network && fsById(id)?.thread !== 'archived') network.selectNodes([id]);
-    $('#drawer').hidden = false;
-    if (inspecting()) showTab('footstep');
+    if (network && fsById(id)?.thread !== 'archived') {
+      network.selectNodes([id]);
+      if (!inspecting()) network.focus(id, { scale: network.getScale(), animation: { duration: 300 } });
+    }
+    if (inspecting()) {
+      $('#drawer').hidden = false;
+      showTab('footstep');
+    }
   }
 
   function closeDrawer() {
@@ -1764,7 +1810,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
     } else {
       $('.layout').appendChild(d);
       d.classList.remove('docked');
-      d.hidden = !selectedId;
+      d.hidden = true;
       if (active !== 'draft') showTab('notes');
     }
   }
@@ -2319,7 +2365,7 @@ ${branches.map((f) => `- ${f.event}`).join('\n') || '(none)'}`,
   function init() {
     migrate();
     $('#legend').innerHTML =
-      '<span class="legend-geo">0° points right · line angle = direction · line length = magnitude · circle size = intensity · click a link to delete it</span>' +
+      '<span class="legend-geo">On course climbs at 45° · the line turns by its direction · line length = magnitude · circle size = intensity · click a link to delete it</span>' +
       Object.values(EDGE_TYPES)
         .map((t) => `<span><i style="background:${t.color}"></i>${t.label}</span>`)
         .join('') +

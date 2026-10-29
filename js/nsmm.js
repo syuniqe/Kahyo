@@ -4,7 +4,10 @@
 // Works in the browser (window.NSMM) and in Node (module.exports) for tests.
 
 (function (root) {
-  const STAGES = ['Origin', 'Pandiculation', 'Maxspan', 'Convergence', 'Climax'];
+  const STAGES = ['Origin', 'Pandiculation', 'Maxspan', 'Convergence', 'Conclusion'];
+  // Older Journeys and models may still say Climax.
+  const STAGE_ALIASES = { Climax: 'Conclusion' };
+  const stageName = (s) => STAGE_ALIASES[s] || s;
 
   const DEFAULT_PLANNED_LENGTH = 60;
 
@@ -27,6 +30,8 @@
   const MIN_TO_JUDGE = 3;
   // Footsteps this alike count as one when judging the thread's spread.
   const DUPLICATE = 0.97;
+  // Spread up to this many times the typical one is normal variation (0°).
+  const NOISE = 1.2;
 
   function dot(a, b) {
     let s = 0;
@@ -68,9 +73,9 @@
     return clamp(Math.ceil(0.2 * plannedLength), 3, 20);
   }
 
-  // y in the direction limit: 1 for Origin … 5 for Climax (1 before stages exist).
+  // y in the direction limit: 1 for Origin … 5 for Conclusion (1 before stages exist).
   function stageNumber(stage) {
-    const i = STAGES.indexOf(stage);
+    const i = STAGES.indexOf(stageName(stage));
     return i === -1 ? 1 : i + 1;
   }
 
@@ -80,10 +85,10 @@
     return round2(clamp(0.3 + 0.05 * Math.log2(Math.max(1, plannedLength) / 30), 0.1, 1));
   }
 
-  // X = TF · 180° · (1.2 − 0.2·y), at least 10°. TF 1 allows everything at Origin;
-  // each later stage tightens the limit, to a fifth of it at Climax.
+  // X = TF · 180° · (1.2 − 0.2·y), at least 10°. Each later stage tightens the limit,
+  // so the story is held to a conclusive ending (TF 0.35: 63° at Origin → 13° at Conclusion).
   function directionLimit(tf, stage) {
-    return Math.max(10, tf * 180 * (1.2 - 0.2 * stageNumber(stage)));
+    return clamp(tf * 180 * (1.2 - 0.2 * stageNumber(stage)), 10, 180);
   }
 
   // ---------- one Footstep ----------
@@ -182,8 +187,9 @@
   }
 
   // Signed direction in degrees against the thread heading.
-  // z = stray / typical stray; |θ| = clamp((z − 1)·90°, 0, 180°): a typical Footstep is 0°,
-  // twice as far as typical is 90°, three times is 180°. The sign says which side:
+  // z = stray / typical stray. Up to 1.2 × typical is the story's normal variation and
+  // reads 0°, so tight late-stage limits flag real turns, not noise. Beyond it,
+  // |θ| = clamp((z − 1.2) / 0.8 · 90°, 0, 180°): twice as far as typical is 90°, three times 180°. The sign says which side:
   // + (anticlockwise) leans the way the story has been moving, − (clockwise) back
   // toward where it started, measured on the story's main axis (storyAxis).
   function deviation(embedding, t) {
@@ -196,7 +202,7 @@
       e.map((x, k) => x - t.mean[k]),
       t.u
     );
-    const size = clamp((z - 1) * 90, 0, 180);
+    const size = clamp(((z - NOISE) / (2 - NOISE)) * 90, 0, 180);
     return { degrees: side < 0 ? -size : size, stray, z };
   }
 
@@ -296,7 +302,7 @@
 
   // Heuristic stage labels by position in the planned Journey, used offline
   // and between AI relabels. Fractions of the planned length:
-  // Origin < 12%, Pandiculation < 40%, Maxspan < 70%, Convergence < 90%, Climax.
+  // Origin < 12%, Pandiculation < 40%, Maxspan < 70%, Convergence < 90%, Conclusion.
   const STAGE_BOUNDS = [0.12, 0.4, 0.7, 0.9];
   function heuristicStages(count, plannedLength = DEFAULT_PLANNED_LENGTH) {
     if (count < stageLabelAfter(plannedLength)) return new Array(count).fill(null);
@@ -312,7 +318,7 @@
   function monotonicStages(labels) {
     let best = 0;
     return labels.map((s) => {
-      const i = STAGES.indexOf(s);
+      const i = STAGES.indexOf(stageName(s));
       if (i > best) best = i;
       return STAGES[best];
     });
@@ -321,6 +327,7 @@
   const api = {
     VERSION: 2,
     STAGES,
+    stageName,
     DEFAULT_PLANNED_LENGTH,
     SPLIT_AT,
     JUMP,

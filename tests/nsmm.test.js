@@ -18,11 +18,12 @@ const base = vec();
 const fs = (e, words = 12) => ({ event: Array.from({ length: words }, (_, i) => 'word' + i).join(' '), embedding: e, subjects: [], promises: [], environment: [] });
 const steady = (n, noise = 0.8) => Array.from({ length: n }, () => fs(mix(base, vec(), noise)));
 
-test('direction limit X = TF·180·(1.2 − 0.2y), at least 10°', () => {
+test('direction limit X = TF·180·(1.2 − 0.2y), between 10° and 180°', () => {
   assert.strictEqual(Math.round(N.directionLimit(0.35, 'Origin')), 63);
-  assert.strictEqual(Math.round(N.directionLimit(0.35, 'Climax')), 13);
+  assert.strictEqual(Math.round(N.directionLimit(0.35, 'Conclusion')), 13);
+  assert.strictEqual(N.directionLimit(0.35, 'Climax'), N.directionLimit(0.35, 'Conclusion'));
   assert.strictEqual(Math.round(N.directionLimit(1, 'Origin')), 180);
-  assert.strictEqual(N.directionLimit(0.1, 'Climax'), 10);
+  assert.strictEqual(N.directionLimit(0.1, 'Conclusion'), 10);
   assert.strictEqual(N.directionLimit(0.35, null), N.directionLimit(0.35, 'Origin'));
 });
 
@@ -106,5 +107,5 @@ test('a side path starts at branching factor near 0 and terminates as it drifts'
 });
 
 test('stages only move forward', () => {
-  assert.deepStrictEqual(N.monotonicStages(['Origin', 'Maxspan', 'Origin', 'Climax']), ['Origin', 'Maxspan', 'Maxspan', 'Climax']);
+  assert.deepStrictEqual(N.monotonicStages(['Origin', 'Maxspan', 'Origin', 'Climax']), ['Origin', 'Maxspan', 'Maxspan', 'Conclusion']);
 });
