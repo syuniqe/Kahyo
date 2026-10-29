@@ -414,16 +414,29 @@ dialog .actions { justify-content: flex-end; margin-top: 16px; }
   body { height: auto; }
   .top { flex-wrap: wrap; padding: 10px 16px; }
   .title-input { order: 5; max-width: none; flex-basis: 100%; }
-  .rail { font-size: 9px; flex-wrap: wrap; }
-  .rail li:not(.rail-note) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .rail { font-size: 8.5px; flex-wrap: wrap; gap: 3px; letter-spacing: -0.01em; }
+  .rail li:not(.rail-note) { min-width: 0; }
+  .rail li.rail-note { font-size: 10px; }
+  .graph-card { padding: 16px 12px; }
+  #menu-btn { padding: 6px 9px; font-size: 13px; }
+  .theme-btn { padding: 6px; }
+  .rail li small { display: none; }
+  /* Phone header: logo, Write/Inspect, theme and menu on one line; Settings lives in the menu */
+  body.view-journey #settings-btn, body.view-journey #mode-badge { display: none; }
+  .brand img { height: 26px; }
+  header.top { gap: 6px; padding: 10px 12px; }
+  .mode-switch button { padding: 5px 7px; font-size: 12px; }
+  .spacer { display: none; }
+  .mode-switch { margin-left: auto; }
+  .graph-wrap { height: 62vh; min-height: 380px; }
+  .graph-tools button { padding: 6px 12px; }
   .layout { --gap: 14px; }
-  .top { padding: 10px 16px; }
   .rail li.rail-note { flex-basis: 100%; }
   .layout { grid-template-columns: minmax(0, 1fr); padding: 6px 16px 16px; }
   .right { flex-direction: column; }
   .right > .card { max-height: none; }
   .char-pop { max-height: 70vh; }
-  .graph-card { min-height: 460px; }
+  .graph-card { min-height: 0; }
   .stats { gap: 10px; }
   .home { padding: 20px 16px; }
 }
@@ -500,7 +513,9 @@ body.mode-write .iv-wrap { grid-template-columns: 1fr; }
 .range-labels { padding-left: 128px; }
 @media (max-width: 1180px) {
   .drawer { position: fixed; top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 82vh; border-radius: 22px 22px 0 0; }
-  .mode-switch button { padding: 5px 10px; }
+  .mode-switch button { padding: 5px 7px; font-size: 12px; }
+  .spacer { display: none; }
+  .mode-switch { margin-left: auto; }
 }
 
 /* Inspect: the moment's pane is docked as the first tab */
@@ -538,3 +553,6 @@ body.pane-closed .pane-open { display: flex; }
 .readout dd.warn { color: var(--amber); }
 .fs-notes { margin-top: 12px; }
 dialog label[hidden] { display: none; }
+
+.graph-tools { display: flex; gap: 6px; }
+#undo[hidden] { display: none; }

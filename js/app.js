@@ -1042,6 +1042,7 @@
     $('#home').hidden = true;
     $('#journey-view').hidden = false;
     renderAll({ fit: true });
+    renderUndo();
     // Journeys from before the engine moved to the server get their numbers once.
     if (!j.engine && j.footsteps.length)
       rescoreAll().then((ok) => {
@@ -1462,7 +1463,7 @@
       const counts = {};
       mainInOrder().forEach((f) => (counts[f.stage] = (counts[f.stage] || 0) + 1));
       const now = NSMM.STAGES.indexOf(journey.stage);
-      $('#rail').innerHTML = NSMM.STAGES.map((s, i) => `<li class="${i < now ? 'done' : i === now ? 'now' : ''}">${s}${counts[s] ? ` · ${counts[s]}` : ''}</li>`).join('');
+      $('#rail').innerHTML = NSMM.STAGES.map((s, i) => `<li class="${i < now ? 'done' : i === now ? 'now' : ''}">${s}${counts[s] ? `<small> · ${counts[s]}</small>` : ''}</li>`).join('');
     }
     $('#alert-count').textContent = open ? String(open) : '';
     $('#alert-count').className = open ? 'count' : '';
@@ -1998,19 +1999,51 @@
     return (journey.title || 'journey').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'journey';
   }
 
+  // ---------- undo ----------
+
+  // Before each change Kahyo keeps a copy of the Journey (the last 20, this session only).
+  let undoStack = [];
+  function remember(label) {
+    if (!journey) return;
+    undoStack.push({ id: journey.id, label, data: JSON.stringify(journey) });
+    if (undoStack.length > 20) undoStack.shift();
+    renderUndo();
+  }
+
+  function renderUndo() {
+    const last = journey && undoStack.filter((u) => u.id === journey.id).pop();
+    $('#undo').hidden = !last;
+    if (last) $('#undo').title = 'Undo: ' + last.label + ' (Ctrl+Z)';
+  }
+
+  function undo() {
+    if (!journey || document.body.classList.contains('busy')) return;
+    const i = undoStack.map((u) => u.id).lastIndexOf(journey.id);
+    if (i < 0) return setStatus('Nothing to undo.');
+    const [u] = undoStack.splice(i, 1);
+    journey = JSON.parse(u.data);
+    if (selectedId && !fsById(selectedId)) selectedId = null;
+    save();
+    renderAll();
+    if (selectedId) selectFootstep(selectedId);
+    renderUndo();
+    setStatus(`Undone: ${u.label}.`, 'ok');
+  }
+
   function deleteFootstep(f) {
-    if (!confirm(`Delete ${f.id}? This cannot be undone.`)) return;
+    remember(`delete ${f.id}`);
     removeFootstep(f.id);
     run(async () => {
       await relabelStages(false);
       save();
       renderAll();
-      setStatus(`Deleted ${f.id}.`, 'ok');
+      setStatus(`Deleted ${f.id}. Press Undo to bring it back.`, 'ok');
     });
   }
 
   // Apply an edit to one of the Footstep's text parameters, then re-score.
   function editFootstep(f, field, value) {
+    remember(`edit ${f.id}`);
     const lines = (v) => v.split('\n').map((s) => s.trim()).filter(Boolean);
     if (field === 'event' && value.trim()) {
       f.event = value.trim();
@@ -2049,6 +2082,7 @@
         const text = $('#transcript').value;
         if (!text.trim()) return setStatus('Speak or type a story idea first.', 'warn');
         setStatus(LLM.hasKey() ? 'Understanding where this goes in your story…' : 'Structuring (offline mode)…');
+        remember('add a Footstep');
         await addThought(text, null, $('#place').value);
         $('#transcript').value = '';
         $('#place').value = 'AUTO';
@@ -2062,6 +2096,13 @@
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) $('#add').click();
     });
     $('#render').addEventListener('click', () => run(renderDraft));
+    $('#undo').addEventListener('click', undo);
+    document.addEventListener('keydown', (e) => {
+      if (e.key.toLowerCase() !== 'z' || !(e.ctrlKey || e.metaKey) || e.shiftKey || !journey) return;
+      if (e.target.closest('input, textarea, select, [contenteditable]') || document.querySelector('dialog[open]')) return;
+      e.preventDefault();
+      undo();
+    });
     $('#fit').addEventListener('click', () => {
       if (!network) return;
       fitMap();
@@ -2115,7 +2156,9 @@
     $('#pane-close').addEventListener('click', () => setPane(false));
     $('#pane-open').addEventListener('click', () => setPane(true));
     $('#clear-notes').addEventListener('click', () => {
-      if (confirm('Clear every open note?')) clearNotes();
+      if (!confirm('Clear every open note?')) return;
+      remember('clear notes');
+      clearNotes();
     });
 
     document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
@@ -2146,6 +2189,10 @@
       if (!t || !journey) return;
       const f = selectedId && fsById(selectedId);
       const c = charView && character(charView);
+      // Everything that changes the Journey can be undone.
+      const d = t.dataset;
+      if ((d.act && d.act !== 'change') || (d.move && f) || d.shift || (t.hasAttribute('data-split') && f) || d.seedDel || d.edgeDel || (t.hasAttribute('data-seeds-clear') && f) || d.physDel || d.traitDel)
+        remember(d.act ? NOTE_TITLES[journey.alerts.find((a) => a.id === d.a)?.kind]?.toLowerCase() || 'note' : d.move ? 'move' : d.shift ? 'reorder' : d.seedDel || d.edgeDel || d.seedsClear !== undefined ? 'link change' : 'change');
       if (t.hasAttribute('data-drift')) {
         if (document.body.classList.contains('pane-closed')) setPane(true);
         showTab(inspecting() ? 'storyline' : 'notes');
@@ -2204,6 +2251,7 @@
         renderCharacters();
       } else if (t.hasAttribute('data-char-del') && c) {
         if (!confirm(`Remove ${c.name} from the character list? Footsteps keep their text.`)) return;
+        remember(`remove ${c.name}`);
         journey.characters = journey.characters.filter((x) => x !== c);
         charView = null;
         save();
@@ -2285,6 +2333,10 @@
     $('#modifier').addEventListener('input', (e) => {
       const f = fsById(selectedId);
       if (!f || !e.target.hasAttribute('data-intensity')) return;
+      if (!e.target.dataset.remembered) {
+        remember(`intensity of ${f.id}`);
+        e.target.dataset.remembered = '1';
+      }
       f.intensity = Number(e.target.value);
       f.intensityByWriter = true;
       $('#v-int').textContent = f.intensity.toFixed(2);
