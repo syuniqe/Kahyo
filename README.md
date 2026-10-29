@@ -21,7 +21,7 @@ Without a key the app still works in **offline mode**: one Footstep per idea, si
    python3 -m http.server 8000
    # open http://localhost:8000
    ```
-2. **Menu → Load sample story** to see a finished Journey (*The Salt Road*) with one drifting branch and one trait break.
+2. **Menu → Load sample story** to see a finished Journey (*The Salt Road*) that shows every feature: a side path at its limit, an off-course turn, a Footstep holding three events, a Jump, a Crawl, a repeat and a trait break.
 3. For AI mode: **Settings** → get a free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) → paste → Save.
 4. Press **Speak**, think out loud, then **Add to Journey**. Ctrl/⌘ + Enter also adds.
 5. New ideas continue the story by default. To slot one in earlier, pick a spot in **Place it**, or select a Footstep and press **Add next idea after this**. With a Gemini key, Kahyo also works out the spot from what you say ("before the king...", "back at the start"). **↑ Earlier / ↓ Later** reorder a Footstep.
