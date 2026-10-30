@@ -12,6 +12,7 @@ const EXTRACT_SCHEMA = `{
     "promises": ["setups planted that the story must later pay off"],
     "seeds": [{"target": "existing id like FS#003, or NEW1/NEW2 for an earlier footstep in this same list", "type": "cause|casual|character_arc", "direction": "from (the target causes this one) or to (this one causes the target)"}]
   }],
+  "rejoins": "only if this fragment is where an open side path's character or thread comes back into the MAIN story (e.g. a missing character returns for the final fight): that side path's latest Footstep id; otherwise null",
   "place_after": "a side path's latest Footstep id if this continues that side path; otherwise the main-thread id these new Footsteps come right after in STORY time, START if they come before everything, or END if they simply continue the main story",
   "aliases": [{"alias": "another name or description used for a character", "name": "that character's canonical name"}],
   "new_traits": [{"character": "name", "trait": "one short trait, e.g. jealous, arrogant, never lies"}],
@@ -50,8 +51,8 @@ export const TASKS = {
     const sides = paths
       .map(
         (p) =>
-          `Side path${p.from ? ` leaving ${p.from}` : ''}${p.ended ? ' (ended)' : ''}:\n` +
-          p.steps.map((f, i) => `   ${f.id}: ${f.event}${i === p.steps.length - 1 && !p.ended ? '   <- its latest Footstep' : ''}`).join('\n')
+          `Side path${p.from ? ` leaving ${p.from}` : ''}${p.ended ? ' (ended)' : ''}${p.rejoins ? ` (already rejoined the main story at ${p.rejoins})` : ''}:\n` +
+          p.steps.map((f, i) => `   ${f.id}: ${f.event}${i === p.steps.length - 1 && !p.ended && !p.rejoins ? '   <- its latest Footstep' : ''}`).join('\n')
       )
       .join('\n');
     const people = extractPeople(d.characters);
@@ -64,6 +65,7 @@ Writers speak out of order and do not say where an idea goes. Read its content a
 - If it continues one of the side paths below (the same "what if", the same characters in that situation, or it follows from that path's events), set place_after to that side path's latest Footstep id. This matters most: never put a side path's idea on the main thread.
 - If it happens earlier in the main story (e.g. "before the king...", "earlier,", "back when", or the content clearly comes before), set place_after to the main Footstep it follows, or START.
 - Only use END when it truly continues the end of the main story.
+- A side path can also come back: when the fragment happens on the main story but brings back a side path's character or thread (a missing character returns, two threads meet for the climax), place it on the main story and set rejoins to that side path's latest Footstep id.
 Use the story so far to understand pronouns and references.
 Characters: use one canonical name per person. When the writer reveals that a description or second name is someone already known (e.g. "the prince's wife" is Rita, or Arjun's father turns out to be Krishna), add it to aliases and use the canonical name in subjects.
 Link each new Footstep to earlier ones for every real relationship: cause (one makes the other happen; if one changed, the other would too; this includes a setup and its payoff, or a promise and where it is kept), casual (a looser connection, like a shared theme, place or object), or character_arc (the same character's change or return). Most Footsteps have one or two links. Story order is tracked separately.

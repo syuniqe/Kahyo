@@ -12,9 +12,10 @@
     casual: { label: 'Casual link', back: 'Casual link', color: '#b07ad4' },
     character_arc: { label: 'Character arc', back: 'Character arc', color: '#6db3e0' },
     temporal: { label: 'Story order', back: 'Story order', color: '#7a7a8e' },
+    rejoin: { label: 'Rejoins the story', back: 'Rejoined by', color: '#b7791f' },
   };
   // Each link type has its own colour; casual links are also dashed.
-  const LINK_DASHES = { casual: [7, 5] };
+  const LINK_DASHES = { casual: [7, 5], rejoin: [6, 4] };
   const LILAC = '#9b72d9';
   const OLD_EDGE = { causal: 'cause', setup_resolution: 'cause', thematic: 'casual' };
   const OLD_STRICTNESS = { strict: 0.9, moderate: 0.6, flexible: 0.3, off: 0 };
@@ -220,6 +221,43 @@
     return f;
   }
 
+  const NAME_SKIP = new Set('The Then When While After Before And But Meanwhile Later Soon One That This They She His Her Their There Here What Why How Who Next Finally Suddenly Years Days Morning Night'.split(' '));
+
+  // A side path is closed when it ended or met the main story again.
+  function closed(start) {
+    return Boolean(start.ended || start.rejoins);
+  }
+
+  // A side path can meet the main story again: a missing character comes back for
+  // the final fight. Its last Footstep links into the main Footstep where they meet.
+  function rejoin(tip, mainId) {
+    const start = pathStart(tip);
+    unrejoin(start);
+    start.rejoins = mainId;
+    journey.edges.push({ from: tip.id, to: mainId, type: 'rejoin' });
+    // Its drift and terminancy notes no longer apply: the path came back.
+    journey.alerts
+      .filter((a) => a.open && ['drifting', 'terminate', 'branch'].includes(a.kind) && fsById(a.fsId) && fsById(a.fsId).thread === 'branch' && pathStart(fsById(a.fsId)) === start)
+      .forEach((a) => ((a.open = false), (a.resolution = 'rejoin')));
+  }
+
+  function unrejoin(start) {
+    const ids = new Set(journey.footsteps.filter((f) => f.thread === 'branch' && pathStart(f) === start).map((f) => f.id));
+    journey.edges = journey.edges.filter((e) => !(e.type === 'rejoin' && ids.has(e.from)));
+    delete start.rejoins;
+  }
+
+  // A rejoin only stands while its link and its main Footstep do.
+  function checkRejoins() {
+    journey.footsteps
+      .filter((f) => f.rejoins)
+      .forEach((start) => {
+        const ok = fsById(start.rejoins)?.thread === 'main' && journey.edges.some((e) => e.type === 'rejoin' && e.to === start.rejoins && fsById(e.from) && pathStart(fsById(e.from)) === start);
+        if (!ok) unrejoin(start);
+      });
+    journey.edges = journey.edges.filter((e) => e.type !== 'rejoin' || (fsById(e.from)?.thread === 'branch' && pathStart(fsById(e.from)).rejoins === e.to));
+  }
+
   // Terminancy factor: the writer's override, else automatic from the planned length.
   function tfValue() {
     return Number.isFinite(journey.tf) ? journey.tf : journey.engine?.autoTf ?? 0.35;
@@ -352,7 +390,7 @@
     return {
       title: journey.title,
       main: mainInOrder().map((f) => ({ id: f.id, event: f.event })),
-      branches: sidePaths().map((p) => ({ from: branchRoot(p.steps[0])?.id || null, ended: Boolean(p.start.ended), steps: p.steps.map((f) => ({ id: f.id, event: f.event })) })),
+      branches: sidePaths().map((p) => ({ from: branchRoot(p.steps[0])?.id || null, ended: Boolean(p.start.ended), rejoins: p.start.rejoins || null, steps: p.steps.map((f) => ({ id: f.id, event: f.event })) })),
       characters: characterData(),
       transcript,
     };
@@ -410,7 +448,7 @@
     const main = tail.length ? like(tail) : 0;
     let pick = null;
     sidePaths()
-      .filter((p) => !p.start.ended)
+      .filter((p) => !closed(p.start))
       .forEach((p) => {
         const score = like(p.steps);
         if (score > main + 0.05 && score > 0.25 && (!pick || score > pick.score)) pick = { tip: p.steps[p.steps.length - 1], score };
@@ -573,7 +611,7 @@
       (raw.seeds || []).forEach((sd) => {
         const other = resolve(sd.target);
         if (!other || other === fs.id) return;
-        const type = OLD_EDGE[sd.type] || (EDGE_TYPES[sd.type] && sd.type !== 'temporal' ? sd.type : null);
+        const type = OLD_EDGE[sd.type] || (EDGE_TYPES[sd.type] && !['temporal', 'rejoin'].includes(sd.type) ? sd.type : null);
         if (!type) return;
         const forward = String(sd.direction || 'from').toLowerCase() === 'to';
         journey.edges.push(forward ? { from: fs.id, to: other, type } : { from: other, to: fs.id, type });
@@ -598,6 +636,48 @@
       fs.violations.push({ character: c.name, trait: trait.text, severity, suggestion: v.suggestion || '' });
       addNote({ kind: 'trait', fsId: fs.id, character: c.name, trait: trait.text, severity, text: `In ${fs.id}, ${c.name} acts against "${trait.text}".`, suggestion: v.suggestion || '' });
     });
+
+    // A side path meeting the main story again: the AI says so, or (No-AI) a character
+    // last seen on an open side path comes back in a new main Footstep.
+    const mainNew = newIds.map(fsById).filter((f) => f?.thread === 'main');
+    if (mainNew.length) {
+      const named = fsById(String(extracted.rejoins || '').trim());
+      const path = named?.thread === 'branch' ? sidePaths().find((p) => p.steps.includes(named)) : null;
+      if (path && !closed(path.start)) {
+        const tip = path.steps[path.steps.length - 1];
+        rejoin(tip, mainNew[0].id);
+        addNote({
+          kind: 'rejoin',
+          fsId: mainNew[0].id,
+          tip: tip.id,
+          text: `The side path from ${path.start.id} meets the main story again at ${mainNew[0].id}.`,
+          maths: '',
+        });
+      } else if (!preExtracted && !LLM.hasKey()) {
+        // Offline, subjects are thin: names written with a capital count too.
+        const namesIn = (f) => [...(f.subjects || []), ...(String(f.event).match(/\b[A-Z][a-z]{2,}\b/g) || []).filter((w) => !NAME_SKIP.has(w))].map((n) => (character(n)?.name || n).toLowerCase());
+        const who = new Set(namesIn(mainNew[0]));
+        sidePaths()
+          .filter((p) => !closed(p.start))
+          .forEach((p) => {
+            const since = p.start.created_at;
+            const onPath = new Set(p.steps.flatMap(namesIn));
+            // Away means: at least two main Footsteps were written since the path began without them.
+            const meanwhile = mainInOrder().filter((f) => f.created_at > since && !newIds.includes(f.id));
+            const inMain = new Set(meanwhile.flatMap(namesIn));
+            const back = meanwhile.length >= 2 ? [...who].filter((n) => onPath.has(n) && !inMain.has(n)) : [];
+            if (!back.length) return;
+            const tip = p.steps[p.steps.length - 1];
+            addNote({
+              kind: 'rejoin-ask',
+              fsId: mainNew[0].id,
+              tip: tip.id,
+              text: `${character(back[0])?.name || back[0].charAt(0).toUpperCase() + back[0].slice(1)} was last seen on the side path from ${p.start.id}. Does that side path meet the main story again here, at ${mainNew[0].id}?`,
+              maths: '',
+            });
+          });
+      }
+    }
 
     await relabelStages(!preExtracted);
     syncNotes(newIds);
@@ -647,7 +727,7 @@
             maths: `${Math.round(m.repeat.similarity * 100)}% alike`,
           });
         // A lot in a strange direction (the intent vector reaches the stage limit): branch it.
-        if (m.branchHint && !(f.thread === 'branch' && (f.subStart || pathStart(f).ended)))
+        if (m.branchHint && !(f.thread === 'branch' && (f.subStart || closed(pathStart(f)))))
           addNote({
             kind: 'branch',
             fsId: f.id,
@@ -693,6 +773,7 @@
   // On a side path, "drifting" lives only in this note, which says plainly that the
   // path is being let drift; the path also fades as its sector grows.
   function syncTerminancy() {
+    checkRejoins();
     const ends = pathEnds();
     journey.alerts
       .filter((a) => a.open && ['terminate', 'drifting'].includes(a.kind) && fsById(a.fsId))
@@ -702,7 +783,7 @@
       });
     Object.values(ends).forEach((f) => {
       const t = f.metrics?.terminancy;
-      if (!t || pathStart(f).ended || pathStart(f).letDrift === f.id) return;
+      if (!t || closed(pathStart(f)) || pathStart(f).letDrift === f.id) return;
       if (f.metrics.branch === 'drifting')
         return addNote({
           kind: 'drifting',
@@ -1012,6 +1093,8 @@
         .filter((x) => x.open && ['drifting', 'terminate', 'branch'].includes(x.kind) && fsById(x.fsId) && pathStart(fsById(x.fsId)) === start)
         .forEach((x) => ((x.open = false), (x.resolution = 'end')));
     }
+    if (action === 'rejoin' && fs && fsById(a.tip)?.thread === 'branch') rejoin(fsById(a.tip), fs.id);
+    if (action === 'unrejoin' && fsById(a.tip)) unrejoin(pathStart(fsById(a.tip)));
     // Letting a side path drift is the writer's choice: no more drift note until it grows.
     if (action === 'drift' && fs) pathStart(fs).letDrift = fs.id;
     if (action === 'dismiss') journey.driftDismissedAt = journey.footsteps.length;
@@ -1258,7 +1341,8 @@
 
   // Side paths fade with how far their sector has opened: 1 at the start, 0.4 at the limit.
   function fade(f) {
-    const r = f.thread === 'branch' ? f.metrics?.terminancy?.ratio ?? 0 : 0;
+    // A side path that came back to the story is not fading away.
+    const r = f.thread === 'branch' && !pathStart(f).rejoins ? f.metrics?.terminancy?.ratio ?? 0 : 0;
     return 1 - 0.6 * Math.min(1, r);
   }
 
@@ -1332,7 +1416,7 @@
       const branch = f.thread === 'branch';
       const m = f.metrics || {};
       const heavy = m.sizeFlag === 'jump';
-      const over = f.thread === 'main' ? m.dirStatus === 'off' : m.branch === 'terminate' && !pathStart(f).ended;
+      const over = f.thread === 'main' ? m.dirStatus === 'off' : m.branch === 'terminate' && !closed(pathStart(f));
       const wander = f.thread === 'main' && ['wander', 'drifting'].includes(m.dirStatus);
       const intensity = intensityOf(f);
       const status = f.thread === 'main' ? DIR_WORDS[m.dirStatus] || '' : f.subStart ? 'sub-path' : 'side path';
@@ -1381,7 +1465,7 @@
               ? `${e.from} → ${e.to}\nDirection ${deg(m.direction ?? 0)}\nMagnitude ${m.magnitude ?? 0}`
               : `${e.from} → ${e.to}`
             : EDGE_TYPES[e.type]?.label,
-          width: vecLine ? 2.5 : e.type === 'cause' ? 2 : 1.7,
+          width: vecLine || e.type === 'rejoin' ? 2.5 : e.type === 'cause' ? 2 : 1.7,
           smooth: vecLine ? false : { type: 'curvedCW', roundness: 0.3 },
         };
       });
@@ -1513,7 +1597,7 @@
     const order = mainInOrder();
     // Side-path tips: the last Footstep on each side path that has not ended.
     const tips = journey.footsteps.filter(
-      (f) => f.thread === 'branch' && !pathStart(f).ended && !journey.edges.some((e) => e.from === f.id && e.type === 'temporal' && fsById(e.to)?.thread === 'branch')
+      (f) => f.thread === 'branch' && !closed(pathStart(f)) && !journey.edges.some((e) => e.from === f.id && e.type === 'temporal' && fsById(e.to)?.thread === 'branch')
     );
     sel.innerHTML =
       `<option value="AUTO">Let Kahyo decide</option><option value="END">At the end of the main story</option><option value="START">At the very start</option>` +
@@ -1659,6 +1743,8 @@
     jump: 'Jump',
     crawl: 'Crawl',
     drifting: 'Side path drifting',
+    rejoin: 'Side path rejoins',
+    'rejoin-ask': 'Does a side path rejoin here?',
     terminate: 'Side path at its limit',
     drift: 'The story is drifting',
     terminancy: 'Moved to a side path',
@@ -1681,6 +1767,10 @@
         return b('remove', 'Delete this one') + b('accept', 'Keep both');
       case 'drifting':
         return b('drift', 'Let it drift') + b('change', 'Lean it back');
+      case 'rejoin':
+        return b('accept', 'Keep it') + b('unrejoin', "It doesn't rejoin");
+      case 'rejoin-ask':
+        return b('rejoin', 'Yes, it rejoins here') + b('accept', 'No');
       case 'terminate':
         return b('end', 'Let it end here') + b('change', 'Change its steps') + b('accept', 'Keep going');
       case 'trait':
@@ -1723,6 +1813,7 @@
   function pullWords(f) {
     const m = f.metrics || {};
     if (f.thread === 'branch') {
+      if (pathStart(f).rejoins) return `Its side path meets the main story again at ${pathStart(f).rejoins}.`;
       const st = { ok: 'Its side path stays close to the main story.', drifting: 'Its side path is opening wide from the main story, so it fades.', terminate: 'Its side path has opened so wide it will be hard to bring back.' };
       return st[m.branch] || 'A side path.';
     }
@@ -1730,6 +1821,18 @@
     const size = m.sizeFlag === 'jump' ? 'A Jump: a lot happens at once' : m.sizeFlag === 'crawl' ? 'A Crawl: little happens' : 'A usual-sized step';
     const dir = { on: 'on course', wander: 'that wanders a little', drifting: 'that is drifting', off: 'that goes off course' }[m.dirStatus] || 'on course';
     return `${size}, ${dir}.${m.branchHint ? ' Kahyo suggests branching it.' : ''}`;
+  }
+
+  // Where this side path meets the main story again, if it does.
+  function rejoinPicker(f) {
+    const start = pathStart(f);
+    if (start.ended) return '';
+    const root = branchRoot(start);
+    const order = mainInOrder();
+    const from = root && order.includes(root) ? order.indexOf(root) + 1 : 0;
+    const opts = order.slice(from).map((m) => `<option value="${esc(m.id)}" ${start.rejoins === m.id ? 'selected' : ''}>${esc(m.id)} · ${esc(shortText(m.event, 32))}</option>`);
+    if (!opts.length) return '';
+    return `<label class="small rejoin-pick">Meets the main story at <select data-rejoin-at aria-label="Where this side path meets the main story again"><option value="">Doesn't rejoin</option>${opts.join('')}</select></label>`;
   }
 
   // The selected Footstep's packet, editable, shown in the drawer.
@@ -1793,7 +1896,7 @@
     el.innerHTML = `
       <div class="actions">
         ${f.thread === 'main' ? `<button data-place-after="${esc(f.id)}">Add next idea after this</button><button data-shift="-1" aria-label="Move earlier in the story">↑ Earlier</button><button data-shift="1" aria-label="Move later in the story">↓ Later</button>` : ''}
-        ${f.thread === 'branch' ? `<button data-place-after="${esc(f.id)}">Continue this side path</button>` : ''}
+        ${f.thread === 'branch' ? `<button data-place-after="${esc(f.id)}">Continue this side path</button>${rejoinPicker(f)}` : ''}
         ${f.thread !== 'main' ? `<button data-move="main">Bring into main story</button>` : `<button data-move="branch">Make it a side path</button>`}
         <button data-split class="${f.metrics?.sizeFlag === 'jump' ? 'primary' : ''}">Split in two</button>
         <button data-move="archived">Set aside</button>
@@ -2454,6 +2557,19 @@
       rescoreAll().then((ok) => ok && journey && fsById(f.id) && updateReadouts(f));
     });
     $('#modifier').addEventListener('change', (e) => {
+      if (e.target.hasAttribute('data-rejoin-at')) {
+        const f = fsById(selectedId);
+        if (!f || f.thread !== 'branch') return;
+        remember('rejoin');
+        const path = sidePaths().find((p) => p.steps.includes(f));
+        if (e.target.value) rejoin(path.steps[path.steps.length - 1], e.target.value);
+        else unrejoin(path.start);
+        save();
+        renderAll();
+        selectFootstep(f.id);
+        setStatus(e.target.value ? `The side path from ${path.start.id} now meets the main story at ${e.target.value}.` : `The side path from ${path.start.id} no longer rejoins the main story.`, 'ok');
+        return;
+      }
       if (!e.target.hasAttribute('data-intensity')) return;
       save();
       renderGraph();

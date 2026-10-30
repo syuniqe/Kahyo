@@ -555,3 +555,5 @@ dialog label[hidden] { display: none; }
 
 .graph-tools { display: flex; gap: 6px; }
 #undo[hidden] { display: none; }
+.rejoin-pick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; width: 100%; }
+.rejoin-pick select { flex: 1; min-width: 0; }
