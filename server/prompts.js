@@ -12,7 +12,7 @@ const EXTRACT_SCHEMA = `{
     "promises": ["setups planted that the story must later pay off"],
     "seeds": [{"target": "existing id like FS#003, or NEW1/NEW2 for an earlier footstep in this same list", "type": "cause|casual|character_arc", "direction": "from (the target causes this one) or to (this one causes the target)"}]
   }],
-  "place_after": "the existing main-thread id these new Footsteps come right after in STORY time, START if they come before everything, or END if they simply continue the story",
+  "place_after": "a side path's latest Footstep id if this continues that side path; otherwise the main-thread id these new Footsteps come right after in STORY time, START if they come before everything, or END if they simply continue the main story",
   "aliases": [{"alias": "another name or description used for a character", "name": "that character's canonical name"}],
   "new_traits": [{"character": "name", "trait": "one short trait, e.g. jealous, arrogant, never lies"}],
   "physical_features": [{"character": "name", "feature": "a short phrase about body, face, age, clothing or voice the writer stated, e.g. 'big, fat king'"}],
@@ -41,11 +41,18 @@ function people(characters = []) {
 export const TASKS = {
   // data: { title, main: [{id, event}], branches: [{id, event}], characters, transcript }
   extract(d) {
-    const recent = [
-      ...(d.main || []).map((f, i) => `${i + 1}. ${f.id}: ${f.event}`),
-      ...(d.branches || []).map((f) => `   (side path) ${f.id}: ${f.event}`),
-    ]
+    const recent = (d.main || [])
+      .map((f, i) => `${i + 1}. ${f.id}: ${f.event}`)
       .slice(-80)
+      .join('\n');
+    // Older clients sent a flat list of side-path Footsteps.
+    const paths = (d.branches || []).map((p) => (Array.isArray(p.steps) ? p : { from: null, steps: [p] }));
+    const sides = paths
+      .map(
+        (p) =>
+          `Side path${p.from ? ` leaving ${p.from}` : ''}${p.ended ? ' (ended)' : ''}:\n` +
+          p.steps.map((f, i) => `   ${f.id}: ${f.event}${i === p.steps.length - 1 && !p.ended ? '   <- its latest Footstep' : ''}`).join('\n')
+      )
       .join('\n');
     const people = extractPeople(d.characters);
     const transcript = String(d.transcript || '');
@@ -53,7 +60,11 @@ export const TASKS = {
       prompt: `You are the extraction layer of Kahyo, a voice-first storytelling system based on the Wordwalk Model, a Narrative Storyline Mapping Model (NSMM), and its ThoughtSense Engine.
 A writer just spoke a fragment of their story out loud. Turn it into exactly ONE Footstep, however many sentences it has. Never split it: the writer decides that. Instead, set events_count to the number of separate story events it holds.
 The event is the writer's own words. Keep their wording; fix only grammar and drop filler ("um", "so basically"). Do not summarise, shorten or rephrase.
-Writers speak out of order. Decide where the new Footsteps belong in the story's timeline and set place_after. Use END unless the writer signals otherwise (e.g. "before the king...", "earlier,", "at the start", "back in step 2") or the content clearly happens earlier. Use the story so far to understand pronouns and references.
+Writers speak out of order and do not say where an idea goes. Read its content and decide where it belongs, then set place_after:
+- If it continues one of the side paths below (the same "what if", the same characters in that situation, or it follows from that path's events), set place_after to that side path's latest Footstep id. This matters most: never put a side path's idea on the main thread.
+- If it happens earlier in the main story (e.g. "before the king...", "earlier,", "back when", or the content clearly comes before), set place_after to the main Footstep it follows, or START.
+- Only use END when it truly continues the end of the main story.
+Use the story so far to understand pronouns and references.
 Characters: use one canonical name per person. When the writer reveals that a description or second name is someone already known (e.g. "the prince's wife" is Rita, or Arjun's father turns out to be Krishna), add it to aliases and use the canonical name in subjects.
 Link each new Footstep to earlier ones for every real relationship: cause (one makes the other happen; if one changed, the other would too; this includes a setup and its payoff, or a promise and where it is kept), casual (a looser connection, like a shared theme, place or object), or character_arc (the same character's change or return). Most Footsteps have one or two links. Story order is tracked separately.
 Check every new Footstep against the character traits below. Strictness goes from 0 (the character may evolve freely) to 1 (must never break a trait). Report a violation only when a character acts against a trait by more than their strictness allows. Use "hard" when strictness is 0.8 or more.
@@ -62,6 +73,9 @@ Only report new_traits the writer explicitly states about a character's lasting 
 Journey: ${d.title}
 Main thread in story order (oldest first):
 ${recent || '(none yet)'}
+
+Side paths (what-ifs that leave the main thread):
+${sides || '(none yet)'}
 
 Characters:
 ${people || '(none yet)'}

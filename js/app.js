@@ -352,7 +352,7 @@
     return {
       title: journey.title,
       main: mainInOrder().map((f) => ({ id: f.id, event: f.event })),
-      branches: journey.footsteps.filter((f) => f.thread === 'branch').map((f) => ({ id: f.id, event: f.event })),
+      branches: sidePaths().map((p) => ({ from: branchRoot(p.steps[0])?.id || null, ended: Boolean(p.start.ended), steps: p.steps.map((f) => ({ id: f.id, event: f.event })) })),
       characters: characterData(),
       transcript,
     };
@@ -366,6 +366,56 @@
       traits: c.traits.map((t) => t.text),
       strictness: c.strictness ?? 0.6,
     }));
+  }
+
+  // Each side path that is still open (or ended), its Footsteps in writing order.
+  function sidePaths() {
+    const paths = new Map();
+    journey.footsteps
+      .filter((f) => f.thread === 'branch')
+      .sort((a, b) => a.created_at - b.created_at)
+      .forEach((f) => {
+        const start = pathStart(f);
+        if (!paths.has(start.id)) paths.set(start.id, { start, steps: [] });
+        paths.get(start.id).steps.push(f);
+      });
+    return [...paths.values()];
+  }
+
+  function cos(a, b) {
+    if (!a || !b || a.length !== b.length) return 0;
+    let d = 0;
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < a.length; i++) {
+      d += a[i] * b[i];
+      x += a[i] * a[i];
+      y += b[i] * b[i];
+    }
+    return x && y ? d / Math.sqrt(x * y) : 0;
+  }
+
+  // Writers don't tell their story in order. When nothing says where an idea goes,
+  // it joins the open side path it reads most like, if that path fits clearly
+  // better than the end of the main story. Shared characters count too.
+  function closerSidePath(vec, subjects) {
+    const who = new Set(subjects.map((n) => (character(n)?.name || n).toLowerCase()));
+    const like = (steps) => {
+      const best = Math.max(...steps.map((f) => cos(vec, f.embedding)));
+      const names = new Set(steps.flatMap((f) => f.subjects || []).map((n) => n.toLowerCase()));
+      const shared = [...who].filter((n) => names.has(n)).length;
+      return best + (who.size ? (0.15 * shared) / who.size : 0);
+    };
+    const tail = mainInOrder().slice(-3);
+    const main = tail.length ? like(tail) : 0;
+    let pick = null;
+    sidePaths()
+      .filter((p) => !p.start.ended)
+      .forEach((p) => {
+        const score = like(p.steps);
+        if (score > main + 0.05 && score > 0.25 && (!pick || score > pick.score)) pick = { tip: p.steps[p.steps.length - 1], score };
+      });
+    return pick?.tip || null;
   }
 
   // Free, no-key fallback: one Footstep per sentence, subjects from known
@@ -483,7 +533,19 @@
     // Where the new Footsteps go: the writer's pick, else the model's, else the end.
     // Picking a side-path Footstep continues that side path.
     let anchor = placeAfter && placeAfter !== 'AUTO' ? placeAfter : String(extracted.place_after || 'END').trim();
+    // Left to Kahyo and headed for the end: an idea that reads like an open side path goes there.
+    let guessed = null;
+    if ((!placeAfter || placeAfter === 'AUTO') && anchor === 'END' && items.length === 1) {
+      guessed = closerSidePath(vecs[0], (items[0].subjects || []).map(String));
+      if (guessed) anchor = guessed.id;
+    }
+    // The model may name any Footstep on a side path; the idea continues from that path's latest one.
+    if ((!placeAfter || placeAfter === 'AUTO') && fsById(anchor)?.thread === 'branch') {
+      const path = sidePaths().find((p) => p.steps.some((f) => f.id === anchor));
+      if (path) anchor = path.steps[path.steps.length - 1].id;
+    }
     const onBranch = fsById(anchor)?.thread === 'branch';
+    const onBranchAt = onBranch && (!placeAfter || placeAfter === 'AUTO') ? anchor : null;
     if (!onBranch && anchor !== 'START' && !storyOrder().includes(anchor)) anchor = 'END';
 
     items.forEach((raw, i) => {
@@ -545,7 +607,8 @@
     selectFootstep(newIds[newIds.length - 1]);
     // Quiet notes: a dot on the Footstep and a count on the Notes tab, no interruption.
     const flagged = journey.alerts.filter((a) => a.open && newIds.includes(a.fsId)).length;
-    setStatus(`Added ${items.length} Footstep${items.length > 1 ? 's' : ''}.${flagged ? ` Kahyo left ${flagged} note${flagged > 1 ? 's' : ''} in the margin.` : ''}`, 'ok');
+    const where = onBranchAt ? ` It reads like the side path at ${pathStart(fsById(onBranchAt)).id}, so it continues that path. Pick "At the end of the main story" in Place it if you meant the main story.` : '';
+    setStatus(`Added ${items.length} Footstep${items.length > 1 ? 's' : ''}.${where}${flagged ? ` Kahyo left ${flagged} note${flagged > 1 ? 's' : ''} in the margin.` : ''}`, 'ok');
   }
 
   // ---------- notes ----------
@@ -1453,7 +1516,7 @@
       (f) => f.thread === 'branch' && !pathStart(f).ended && !journey.edges.some((e) => e.from === f.id && e.type === 'temporal' && fsById(e.to)?.thread === 'branch')
     );
     sel.innerHTML =
-      `<option value="AUTO">${LLM.hasKey() ? 'Let Kahyo decide' : 'At the end'}</option><option value="START">At the very start</option>` +
+      `<option value="AUTO">Let Kahyo decide</option><option value="END">At the end of the main story</option><option value="START">At the very start</option>` +
       order.map((f, i) => `<option value="${esc(f.id)}">After ${i + 1}. ${esc(shortText(f.event, 40))}</option>`).join('') +
       tips.map((f) => `<option value="${esc(f.id)}">Continue side path after ${esc(f.id)}</option>`).join('');
     sel.value = [...sel.options].some((o) => o.value === keep) ? keep : 'AUTO';
