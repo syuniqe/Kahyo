@@ -32,14 +32,15 @@ Cloudflare Workers static assets: build command `sh build.sh`, deploy command `n
 
 ## The maths
 
-The ThoughtSense Engine is Kahyo's IP. Its formulas live only in `js/nsmm.js` and the private maths review doc, and they are not described here. They move server-side in the next phase. The shipped copy in `dist/` is minified by `build.sh`.
+The ThoughtSense Engine is Kahyo's IP. Its formulas live only in `server/thoughtsense.js` (run by the Cloudflare Worker, never sent to the browser) and the private maths review doc. `js/nsmm.js` is only the browser shim that asks the server to score a Journey.
 
 ## Files
 
 ```
 index.html          page layout
 css/style.css       styles
-js/nsmm.js          ThoughtSense Engine (also runs in Node for tests)
+js/nsmm.js          Browser shim: stage names, offline word vectors, calls /api/engine
+server/thoughtsense.js  ThoughtSense Engine (server only; also runs in Node for tests)
 js/llm.js           AI client (Gemini, Claude and OpenAI-compatible providers, relayed by the server)
 js/app.js           app logic, graph, speech, UI
 js/sample.js        the sample Journey
