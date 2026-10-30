@@ -13,8 +13,8 @@
     character_arc: { label: 'Character arc', back: 'Character arc', color: '#6db3e0' },
     temporal: { label: 'Story order', back: 'Story order', color: '#7a7a8e' },
   };
-  // Each link type has its own line: cause solid, casual dashed, character arc dotted.
-  const LINK_DASHES = { casual: [7, 5], character_arc: [2, 4] };
+  // Each link type has its own colour; casual links are also dashed.
+  const LINK_DASHES = { casual: [7, 5] };
   const LILAC = '#9b72d9';
   const OLD_EDGE = { causal: 'cause', setup_resolution: 'cause', thematic: 'casual' };
   const OLD_STRICTNESS = { strict: 0.9, moderate: 0.6, flexible: 0.3, off: 0 };

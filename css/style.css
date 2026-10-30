@@ -456,7 +456,6 @@ dialog .actions { justify-content: flex-end; margin-top: 16px; }
 .legend i.ring.wander { border-color: #9b72d9; }
 .legend i.line { height: 0; border-radius: 0; background: none !important; border-top: 3px solid var(--c); }
 .legend i.line.casual { border-top-style: dashed; }
-.legend i.line.character_arc { border-top-style: dotted; }
 
 /* ---------- writer-first: modes, health, drawer, notes ---------- */
 body.mode-write .inspect-only { display: none !important; }
