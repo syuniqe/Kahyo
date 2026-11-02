@@ -10,7 +10,7 @@
 
 ## The flow
 
-**Origin → Pandiculation → Maxspan → Convergence → Conclusion.** Stages only move forward. They are labelled once 20% of the planned Footsteps exist (at least 3, at most 20): by the AI when a key is set, by position otherwise. Each later stage allows a smaller turn, so the Conclusion is the strictest.
+**Origin → Pandiculation → Maxspan → Convergence → Conclusion.** Stages only move forward. They are labelled once 20% of the planned Footsteps exist (at least 3, at most 20): by the AI when a key is set, by position otherwise. Whatever the AI proposes, the Worker then applies four rules: the story starts at Origin and moves one stage at a time (no skipping), never goes back, holds each stage for at least two main Footsteps, and keeps each label within 10% of the planned length of where position alone would put it. Each later stage allows a smaller turn, so the Conclusion is the strictest.
 
 ## Step by step: from a spoken idea to the map
 

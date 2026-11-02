@@ -120,9 +120,10 @@
     return out;
   }
 
-  // → { after: how many main Footsteps before stages are labelled, labels: by position }
-  function stages(count, plannedLength, nsmm) {
-    return call({ op: 'stages', nsmm, count, plannedLength });
+  // → { after: how many main Footsteps before stages are labelled, labels: by position }.
+  // With proposed labels (the AI's reading), the server returns them made to obey the stage rules.
+  function stages(count, plannedLength, nsmm, proposed) {
+    return call({ op: 'stages', nsmm, count, plannedLength, ...(proposed ? { proposed } : {}) });
   }
 
   // The models (NSMMs) for the New Journey picker: [{ id, name, for, status }].
