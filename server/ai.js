@@ -27,14 +27,43 @@ function isBusy(status, msg) {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Cloudflare drops a request after 100 seconds (error 524), so every AI call gets
+// a budget: one try may take up to 30 s, and all tries together stop at 60 s.
+export const BUDGET_MS = 60000;
+const TRY_MS = 30000;
+
+function tooSlow(cfg) {
+  const name = PROVIDERS[cfg.provider]?.label || 'The AI';
+  return Object.assign(
+    new Error(`${name} took too long to answer, so Kahyo stopped waiting. It is probably busy or at its free-tier limit. Wait a minute and press Add again, or pick a faster model in AI config.`),
+    { status: 504 }
+  );
+}
+
+const left = (cfg) => (cfg.deadline || Infinity) - Date.now();
+
+// fetch with the budget applied. A call that runs out of time becomes a clear 504.
+async function timed(cfg, url, init = {}) {
+  const ms = Math.min(TRY_MS, left(cfg));
+  if (ms < 2000) throw tooSlow(cfg);
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(ms) });
+  } catch (e) {
+    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') throw tooSlow(cfg);
+    throw e;
+  }
+}
+
 // Retry a busy call twice (after about 2 s and 5 s), then let the caller try another model.
-async function patient(call) {
+async function patient(cfg, call) {
   for (let i = 0; ; i++) {
     try {
       return await call();
     } catch (e) {
       if (!isBusy(e.status, e.message) || i >= 2) throw e;
-      await wait(i ? 5000 : 2000);
+      const pause = i ? 5000 : 2000;
+      if (left(cfg) < pause + 5000) throw e;
+      await wait(pause);
     }
   }
 }
@@ -66,8 +95,8 @@ function parseJSON(text) {
 
 // ---------- Gemini ----------
 
-async function flashModels(key) {
-  const res = await fetch(GEMINI.replace(/models\/$/, 'models?pageSize=200'), { headers: { 'x-goog-api-key': key } });
+async function flashModels(cfg) {
+  const res = await timed(cfg, GEMINI.replace(/models\/$/, 'models?pageSize=200'), { headers: { 'x-goog-api-key': cfg.key } });
   if (!res.ok) return [];
   const { models = [] } = await res.json();
   const version = (name) => Number((name.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
@@ -78,10 +107,10 @@ async function flashModels(key) {
     .sort((a, b) => version(b) - version(a) || a.length - b.length);
 }
 
-async function gemini(model, body, key) {
-  const res = await fetch(`${GEMINI}${model}:generateContent`, {
+async function gemini(model, body, cfg) {
+  const res = await timed(cfg, `${GEMINI}${model}:generateContent`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.key },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw await failure(res, model, 'Gemini');
@@ -93,18 +122,18 @@ async function gemini(model, body, key) {
 async function geminiRun(cfg, body) {
   const model = cfg.model || DEFAULT_MODEL;
   try {
-    return { text: await patient(() => gemini(model, body, cfg.key)) };
+    return { text: await patient(cfg, () => gemini(model, body, cfg)) };
   } catch (e) {
     if (isRetired(e.status, e.message)) {
-      const next = (await flashModels(cfg.key)).find((n) => !/-lite$/.test(n));
+      const next = (await flashModels(cfg)).find((n) => !/-lite$/.test(n));
       if (!next || next === model) throw e;
-      return { text: await gemini(next, body, cfg.key), model: next };
+      return { text: await gemini(next, body, cfg), model: next };
     }
     if (!isBusy(e.status, e.message)) throw e;
     // Busy: try two other Flash models once each, without changing the saved choice.
-    for (const alt of (await flashModels(cfg.key)).filter((n) => n !== model).slice(0, 2)) {
+    for (const alt of (await flashModels(cfg)).filter((n) => n !== model).slice(0, 2)) {
       try {
-        return { text: await gemini(alt, body, cfg.key) };
+        return { text: await gemini(alt, body, cfg) };
       } catch (e2) {
         if (!isBusy(e2.status, e2.message)) throw e2;
       }
@@ -118,7 +147,7 @@ async function geminiRun(cfg, body) {
 // Kahyo's tasks are short extractions, so effort is low. If Claude declines a request,
 // the server-side fallback answers it on another model.
 async function claudeRun(cfg, prompt) {
-  const client = new Anthropic({ apiKey: cfg.key, maxRetries: 2 });
+  const client = new Anthropic({ apiKey: cfg.key, maxRetries: 1, timeout: Math.max(2000, Math.min(TRY_MS * 1.5, left(cfg))) });
   const model = cfg.model || PROVIDERS.claude.model;
   let msg;
   try {
@@ -131,6 +160,7 @@ async function claudeRun(cfg, prompt) {
       messages: [{ role: 'user', content: prompt }],
     });
   } catch (e) {
+    if (e instanceof Anthropic.APIConnectionTimeoutError) throw tooSlow(cfg);
     if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) {
       throw Object.assign(new Error(`Claude refused the key. Check it in AI config. (${e.message})`), { status: e.status });
     }
@@ -147,7 +177,7 @@ async function claudeRun(cfg, prompt) {
 // ---------- OpenAI-compatible ----------
 
 async function chatModel(cfg) {
-  const res = await fetch(cfg.base + '/models', { headers: { Authorization: 'Bearer ' + cfg.key } });
+  const res = await timed(cfg, cfg.base + '/models', { headers: { Authorization: 'Bearer ' + cfg.key } });
   if (!res.ok) return null;
   const { data = [] } = await res.json();
   const ids = data.map((m) => m.id).filter((id) => !/whisper|tts|guard|embed|vision|audio|image/i.test(id));
@@ -160,7 +190,7 @@ async function chatModel(cfg) {
 
 async function chatRun(cfg, prompt, opts) {
   const send = async (model) => {
-    const res = await fetch(cfg.base + '/chat/completions', {
+    const res = await timed(cfg, cfg.base + '/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
       body: JSON.stringify({
@@ -176,7 +206,7 @@ async function chatRun(cfg, prompt, opts) {
   };
   const model = cfg.model || PROVIDERS[cfg.provider].model;
   try {
-    return { text: await patient(() => send(model)) };
+    return { text: await patient(cfg, () => send(model)) };
   } catch (e) {
     if (!isRetired(e.status, e.message)) throw e;
     const next = await chatModel(cfg);
@@ -189,6 +219,7 @@ async function chatRun(cfg, prompt, opts) {
 export async function runTask(cfg, task) {
   const provider = PROVIDERS[cfg.provider] ? cfg.provider : 'gemini';
   if (!cfg.key) throw Object.assign(new Error('No AI key set. Open AI config to add one.'), { status: 400 });
+  cfg = { ...cfg, provider, deadline: Date.now() + BUDGET_MS };
   const json = Boolean(task.schema);
   const prompt = json ? task.prompt + '\n\nReturn JSON only, matching:\n' + task.schema : task.prompt;
   let out;
