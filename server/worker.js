@@ -1,11 +1,12 @@
-// Kahyo's Cloudflare Worker: serves the app and runs the ThoughtSense Engine and
-// the prompts, so neither ever reaches the browser.
-//   POST /api/engine  { op: 'score' | 'stages', ... }   → engine results
-//   POST /api/ai      { task, data, provider, model, baseUrl } + header X-Kahyo-Key → { result, model }
-// Everything else is the static app in dist/.
+// Kahyo's Cloudflare Worker: serves the app and runs the ThoughtSense Engine, the
+// NSMMs and their prompts, so none of them ever reaches the browser.
+//   POST /api/engine  { op: 'models' }                         → the model list for the picker
+//   POST /api/engine  { op: 'score' | 'stages', nsmm?, ... }   → engine results
+//   POST /api/ai      { task, data, nsmm?, provider, model, baseUrl } + header X-Kahyo-Key → { result, model }
+// `nsmm` names the Journey's model (wordwalk when left out); `model` is the AI model.
+// Everything else is the static app in dist/. See README.md in this folder.
 
-import { scoreJourney, stagesFor } from './thoughtsense.js';
-import { TASKS } from './prompts.js';
+import { getModel, publicModels } from './models/index.js';
 import { runTask } from './ai.js';
 
 const MAX_BODY = 4 * 1024 * 1024;
@@ -29,16 +30,25 @@ async function readJSON(request) {
   }
 }
 
+// The Journey's model, or an error the app can show.
+function modelFor(body) {
+  const nsmm = getModel(body.nsmm);
+  if (!nsmm) throw Object.assign(new Error('Unknown model.'), { status: 400 });
+  if (!nsmm.engine) throw Object.assign(new Error(`${nsmm.name} is coming soon.`), { status: 409 });
+  return nsmm;
+}
+
 async function engine(request) {
   const body = await readJSON(request);
-  if (body.op === 'score') return reply(scoreJourney(body));
-  if (body.op === 'stages') return reply(stagesFor(body));
+  if (body.op === 'models') return reply({ models: publicModels() });
+  if (body.op === 'score') return reply(modelFor(body).engine.score(body));
+  if (body.op === 'stages') return reply(modelFor(body).engine.stages(body));
   return reply({ error: 'Unknown engine call.' }, 400);
 }
 
 async function ai(request) {
   const body = await readJSON(request);
-  const make = TASKS[body.task];
+  const make = modelFor(body).tasks[body.task];
   if (!make) return reply({ error: 'Unknown AI task.' }, 400);
   const out = await runTask(
     { provider: body.provider, model: body.model, baseUrl: body.baseUrl, key: request.headers.get('X-Kahyo-Key') || '' },

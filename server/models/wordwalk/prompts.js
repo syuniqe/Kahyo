@@ -1,4 +1,4 @@
-// Kahyo's prompts. Server only: the browser sends story data and a task name,
+// Wordwalk · prompts. Server only: the browser sends story data and a task name,
 // never sees these words, and gets back the model's answer.
 
 const EXTRACT_SCHEMA = `{
@@ -40,7 +40,7 @@ function people(characters = []) {
 
 // Each task: (data) => { prompt, schema?, temperature? }. With a schema the answer is JSON.
 export const TASKS = {
-  // data: { title, main: [{id, event}], branches: [{id, event}], characters, transcript }
+  // data: { title, setup?, main: [{id, event}], branches: [{id, event}], characters, transcript }
   extract(d) {
     const recent = (d.main || [])
       .map((f, i) => `${i + 1}. ${f.id}: ${f.event}`)
@@ -72,7 +72,7 @@ Link each new Footstep to earlier ones for every real relationship: cause (one m
 Check every new Footstep against the character traits below. Strictness goes from 0 (the character may evolve freely) to 1 (must never break a trait). Report a violation only when a character acts against a trait by more than their strictness allows. Use "hard" when strictness is 0.8 or more.
 Only report new_traits the writer explicitly states about a character's lasting nature, as short list items (jealous, arrogant, loyal to the king), and physical_features the writer states about how a character looks or sounds.
 
-Journey: ${d.title}
+Journey: ${d.title}${d.setup ? `\nSetup (the world and situation before the first Footstep): ${d.setup}` : ''}
 Main thread in story order (oldest first):
 ${recent || '(none yet)'}
 
@@ -131,7 +131,7 @@ ${d.main.map((f, i) => `${i + 1}. ${f.id}: ${f.event}`).join('\n')}`,
     };
   },
 
-  // data: { title, characters, main: [{stage, event, context, environment, subjects, promises}], branches: [{event}] }
+  // data: { title, setup?, characters, main: [{stage, event, context, environment, subjects, promises}], branches: [{event}] }
   draft(d) {
     return {
       prompt: `You help a writer; you never replace them. Turn the story Footsteps below into a helper draft of "${d.title}".
@@ -145,7 +145,7 @@ STRICT RULES:
 - No word counts, no notes about length, no commentary.
 - End with "## Open threads": the promises below that later Footsteps do not pay off, one per line. Then "## Side paths": the side-path Footsteps, one per line, if there are any.
 
-Characters:
+${d.setup ? `Setup (the world and situation before the story starts): ${d.setup}\n\n` : ''}Characters:
 ${people(d.characters) || '(none)'}
 
 Main story, in order:

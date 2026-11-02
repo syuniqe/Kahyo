@@ -94,7 +94,7 @@
   // the ones before it just rebuild the thread on the server.
   const lastSent = new WeakMap();
   const pick = (m) => ({ direction: m.direction, magnitude: m.magnitude, judged: m.judged, usual: m.usual, pathDirection: m.pathDirection });
-  // j: { footsteps: [...with pathStart], tf, plannedLength, stage } → { metrics: {id: …}, info }
+  // j: { nsmm, footsteps: [...with pathStart], tf, plannedLength, stage } → { metrics: {id: …}, info }
   async function score(j, { full = false } = {}) {
     const items = j.footsteps.map(wire);
     // A stage change only moves the limit, which the server redoes anyway, so it is left out.
@@ -109,6 +109,7 @@
     }
     const out = await call({
       op: 'score',
+      nsmm: j.nsmm,
       tf: j.tf,
       plannedLength: j.plannedLength,
       stage: j.stage,
@@ -120,9 +121,22 @@
   }
 
   // → { after: how many main Footsteps before stages are labelled, labels: by position }
-  function stages(count, plannedLength) {
-    return call({ op: 'stages', count, plannedLength });
+  function stages(count, plannedLength, nsmm) {
+    return call({ op: 'stages', nsmm, count, plannedLength });
   }
 
-  root.NSMM = { STAGES, stageName, DEFAULT_PLANNED_LENGTH, monotonicStages, localEmbedding, score, stages };
+  // The models (NSMMs) for the New Journey picker: [{ id, name, for, status }].
+  // Asked once; if the server can't be reached, Wordwalk can still be picked.
+  let modelList = null;
+  async function models() {
+    if (modelList) return modelList;
+    try {
+      modelList = (await call({ op: 'models' })).models;
+      return modelList;
+    } catch {
+      return [{ id: 'wordwalk', name: 'Wordwalk', for: 'Stories.', status: 'live' }];
+    }
+  }
+
+  root.NSMM = { STAGES, stageName, DEFAULT_PLANNED_LENGTH, monotonicStages, localEmbedding, score, stages, models };
 })(window);

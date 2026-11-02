@@ -2,7 +2,7 @@
 
 Speak your story. Kahyo turns spoken fragments into **Footsteps**, maps them on a living **Journey** graph, warns when an idea drifts (**Terminancy**) or a character breaks their **traits**, and renders the main thread as a prose draft.
 
-This is a working demo of the **Wordwalk Model**, a Narrative Storyline Mapping Model (NSMM), using the **ThoughtSense Engine**: the maths layer that turns thoughts and words into vectors and logical operations. It costs nothing to run:
+Each Journey uses one **NSMM** (Narrative Structure Mapping Model), picked when it is created: **Wordwalk** (stories) is live; **Rhyme** (poems and songs), **Reason** (studies and papers) and **Juris** (legal cases) show as coming soon. Every model runs on the shared **ThoughtSense Engine**: the maths layer that turns thoughts and words into vectors and signals. Start with [`server/README.md`](server/README.md). It costs nothing to run:
 
 | Part | Free option used |
 | --- | --- |
@@ -32,7 +32,7 @@ Cloudflare Workers static assets: build command `sh build.sh`, deploy command `n
 
 ## The maths
 
-The ThoughtSense Engine is Kahyo's IP. Its formulas live only in `server/thoughtsense.js` (run by the Cloudflare Worker, never sent to the browser) and the private maths review doc. `js/nsmm.js` is only the browser shim that asks the server to score a Journey.
+The ThoughtSense Engine and the NSMMs are Kahyo's IP. They live only in `server/` (run by the Cloudflare Worker, never sent to the browser) and the private maths review doc. `js/nsmm.js` is only the browser shim that asks the server to score a Journey and to list the models.
 
 ## Files
 
@@ -40,12 +40,15 @@ The ThoughtSense Engine is Kahyo's IP. Its formulas live only in `server/thought
 index.html          page layout
 css/style.css       styles
 js/nsmm.js          Browser shim: stage names, offline word vectors, calls /api/engine
-server/thoughtsense.js  ThoughtSense Engine (server only; also runs in Node for tests)
+server/worker.js    Cloudflare Worker: routes /api/engine and /api/ai to the Journey's model
+server/ai.js        AI relay to the writer's provider (key used per call, never stored)
+server/thoughtsense/  ThoughtSense Engine, the shared maths (server only)
+server/models/      the NSMMs: wordwalk/ (live), rhyme/, reason/, juris/ (coming soon)
 js/llm.js           AI client (Gemini, Claude and OpenAI-compatible providers, relayed by the server)
 js/app.js           app logic, graph, speech, UI
 js/sample.js        the sample Journey
 vendor/             vis-network graph library (MIT)
-tests/              node --test tests/nsmm.test.js
+tests/              node --test tests/*.test.js
 ```
 
 ## Privacy
