@@ -28,7 +28,7 @@ Without a key the app still works in **offline mode**: one Footstep per idea, si
 
 ## Deploy (free)
 
-Cloudflare Workers static assets: build command `sh build.sh`, deploy command `npx wrangler deploy` (see `wrangler.jsonc`). Every push to `main` redeploys to https://app.kahyo.workers.dev.
+Cloudflare Workers static assets: build command `sh build.sh`, deploy command `npx wrangler deploy` (see `wrangler.jsonc`). Every push to `main` redeploys to https://app.kahyo.workers.dev (Worker `app`). Every push to `beta` redeploys to https://beta.kahyo.workers.dev (Worker `beta`, production branch `beta`).
 
 ## Beta: accounts
 
