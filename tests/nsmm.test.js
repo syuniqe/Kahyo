@@ -1,7 +1,8 @@
 // ThoughtSense Engine v2 tests: node --test tests/nsmm.test.js
 const test = require('node:test');
 const assert = require('node:assert');
-const N = require('../server/thoughtsense.js');
+// The shared ThoughtSense core plus Wordwalk's rules.
+const N = { ...require('../server/thoughtsense/index.js'), ...require('../server/models/wordwalk/rules.js') };
 
 // Seeded random vectors so every run is the same.
 let seed = 7;

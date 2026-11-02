@@ -1,4 +1,4 @@
-// Kahyo's prompts. Server only: the browser sends story data and a task name,
+// Wordwalk · prompts. Server only: the browser sends story data and a task name,
 // never sees these words, and gets back the model's answer.
 
 const EXTRACT_SCHEMA = `{

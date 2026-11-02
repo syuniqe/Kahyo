@@ -41,10 +41,12 @@
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   }
 
-  function newJourney(title = 'Untitled Journey') {
+  // nsmm: the Journey's model, fixed at creation. Older Journeys get Wordwalk.
+  function newJourney(title = 'Untitled Journey', nsmm = 'wordwalk') {
     return {
       id: uid(),
       title,
+      nsmm,
       stage: null,
       plannedLength: NSMM.DEFAULT_PLANNED_LENGTH,
       tf: null, // null = automatic from the planned length
@@ -854,7 +856,7 @@
     const n = main.length;
     let plan;
     try {
-      plan = await NSMM.stages(n, journey.plannedLength);
+      plan = await NSMM.stages(n, journey.plannedLength, journey.nsmm);
     } catch (e) {
       setStatus(e.message, 'warn');
       return;
@@ -913,7 +915,7 @@
     const footsteps = j.footsteps.map((f) => ({ ...f, pathStart: f.thread === 'branch' ? pathStart(f).id : null }));
     let out;
     try {
-      out = await NSMM.score({ key: j, footsteps, tf: Number.isFinite(j.tf) ? j.tf : null, plannedLength: j.plannedLength, stage: j.stage });
+      out = await NSMM.score({ key: j, nsmm: j.nsmm, footsteps, tf: Number.isFinite(j.tf) ? j.tf : null, plannedLength: j.plannedLength, stage: j.stage });
     } catch (e) {
       setStatus(e.message, 'warn');
       return false;
@@ -2378,8 +2380,12 @@
     document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.tab)));
 
     // home
-    $('#h-new').addEventListener('click', () => {
-      journey = newJourney();
+    $('#h-new').addEventListener('click', openModelPicker);
+    $('#model-list').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-nsmm]');
+      if (!b || b.disabled) return;
+      $('#new-journey').close();
+      journey = newJourney(undefined, b.dataset.nsmm);
       save();
       go(journey.id);
       setTimeout(() => $('#journey-title').select(), 50);
@@ -2686,6 +2692,23 @@
     $('#key-help').innerHTML = info.keyUrl
       ? `Get a key at <a href="${info.keyUrl}" target="_blank" rel="noopener">${info.keyUrl.replace(/^https:\/\//, '')}</a>${p === 'gemini' || p === 'groq' ? ' (free, no card).' : '.'}`
       : 'Any service with an OpenAI-compatible chat API.';
+  }
+
+  // New Journey: pick the kind of work. The list comes from the server; only live
+  // models can be picked, the others show as coming soon.
+  async function openModelPicker() {
+    const list = $('#model-list');
+    list.innerHTML = '<p class="small muted">Loading models…</p>';
+    $('#new-journey').showModal();
+    const models = await NSMM.models();
+    list.innerHTML = models
+      .map(
+        (m) => `<button type="button" class="model-card" data-nsmm="${esc(m.id)}"${m.status === 'live' ? '' : ' disabled'}>
+          <span class="model-name">${esc(m.name)}${m.status === 'live' ? '' : '<span class="pill">Coming soon</span>'}</span>
+          <span class="small muted">${esc(m.for)}</span>
+        </button>`
+      )
+      .join('');
   }
 
   function openSettings() {
