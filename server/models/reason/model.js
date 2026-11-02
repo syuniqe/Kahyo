@@ -7,16 +7,15 @@ export default {
   for: 'Studies, investigations, articles, research papers and theses.',
 
   map: {
-    layout: 'horizontal, right to left',
-    reads: 'Across the page from right to left, one phase after another.',
+    layout: 'horizontal, left to right',
+    reads: 'Across the page from left to right, one phase after another. Each phase drops down into what was done in it.',
   },
 
   phases: [
     { name: 'Introduction', means: 'The question and why it matters.' },
     { name: 'Literature', means: 'What is already known.' },
     { name: 'Methodology', means: 'How the question is studied.' },
-    { name: 'Results', means: 'What was found.' },
-    { name: 'Inference', means: 'What the results mean.' },
+    { name: 'Results and Inference', means: 'What was found and what it means.' },
     { name: 'Conclusion', means: 'The answer and what follows from it.' },
   ],
 

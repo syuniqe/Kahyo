@@ -8,7 +8,7 @@ export default {
 
   map: {
     layout: 'mind map',
-    reads: 'The case sits at the centre. Every other node attaches to the centre or to another node, and every chain leads back to the centre.',
+    reads: 'Circular nodes. The case sits at the centre. Every other node attaches to the centre or to another node, and every chain leads back to the centre.',
   },
 
   // No fixed order: a case grows outward from its centre.

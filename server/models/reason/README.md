@@ -4,9 +4,9 @@
 
 **For:** studies, investigations, articles, research papers and theses.
 
-**Map:** horizontal, read from right to left.
+**Map:** horizontal, read from left to right. Each phase drops down into what was done in it.
 
-**Phases, in order:** Introduction → Literature → Methodology → Results → Inference → Conclusion.
+**Phases, in order:** Introduction → Literature → Methodology → Results and Inference → Conclusion.
 
 ## Still to define
 
