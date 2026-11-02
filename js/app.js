@@ -391,6 +391,7 @@
   function extractData(transcript) {
     return {
       title: journey.title,
+      setup: journey.setup || '',
       main: mainInOrder().map((f) => ({ id: f.id, event: f.event })),
       branches: sidePaths().map((p) => ({ from: branchRoot(p.steps[0])?.id || null, ended: Boolean(p.start.ended), rejoins: p.start.rejoins || null, steps: p.steps.map((f) => ({ id: f.id, event: f.event })) })),
       characters: characterData(),
@@ -1150,6 +1151,7 @@
       // Anything missing becomes a [question] for the writer, never invented.
       const raw = await LLM.run('draft', {
         title: journey.title,
+        setup: journey.setup || '',
         characters: characterData(),
         main: main.map((f) => ({ stage: f.stage, event: f.event, context: f.context, environment: f.environment, subjects: f.subjects, promises: f.promises })),
         branches: branches.map((f) => ({ event: f.event })),
@@ -2384,11 +2386,19 @@
     $('#model-list').addEventListener('click', (e) => {
       const b = e.target.closest('[data-nsmm]');
       if (!b || b.disabled) return;
+      pickModel(b.dataset.nsmm);
+    });
+    $('#nj-create').addEventListener('click', () => {
+      const pick = $('#model-list .model-card.on');
+      if (!pick) return;
+      const title = $('#nj-title').value.trim();
+      journey = newJourney(title || undefined, pick.dataset.nsmm);
+      journey.plannedLength = clamp(Math.round(Number($('#nj-length').value) || NSMM.DEFAULT_PLANNED_LENGTH), 12, 300);
+      journey.setup = $('#nj-setup').value.trim();
       $('#new-journey').close();
-      journey = newJourney(undefined, b.dataset.nsmm);
       save();
       go(journey.id);
-      setTimeout(() => $('#journey-title').select(), 50);
+      if (!title) setTimeout(() => $('#journey-title').select(), 50);
     });
     $('#h-sample').addEventListener('click', () => run(createSample));
     $('#h-import').addEventListener('click', () => $('#import-file').click());
@@ -2694,21 +2704,57 @@
       : 'Any service with an OpenAI-compatible chat API.';
   }
 
-  // New Journey: pick the kind of work. The list comes from the server; only live
-  // models can be picked, the others show as coming soon.
+  // New Journey: pick the kind of work, then name it. The model list (and its words)
+  // comes from the server; only live models can be picked, the others are coming soon.
+  // Each model's small picture shows the shape of its map.
+  function modelGlyph(id) {
+    const ink = 'var(--ink)';
+    const br = 'var(--brand)';
+    const s = 'stroke-width="2" fill="none" stroke-linecap="round"';
+    const dot = ([x, y]) => `<circle cx="${x}" cy="${y}" r="3.6" fill="var(--card)" stroke="${ink}" stroke-width="2"/>`;
+    if (id === 'wordwalk')
+      return `<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M12 50 L24 41 L34 33 L44 24 L52 14" stroke="${ink}" ${s}/>${[[12, 50], [24, 41], [34, 33], [44, 24]].map(dot).join('')}<circle cx="52" cy="14" r="4" fill="${br}"/></svg>`;
+    if (id === 'rhyme')
+      return `<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M30 10 L34 22 L30 34 L34 46 L30 56" stroke="${ink}" ${s}/><path d="M36 40 C52 36 52 24 37 21" stroke="${br}" stroke-dasharray="3 3" ${s}/>${[[30, 10], [34, 22], [30, 34], [34, 46]].map(dot).join('')}<circle cx="30" cy="56" r="4" fill="${br}"/></svg>`;
+    if (id === 'reason')
+      return `<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M10 20 L54 20" stroke="${ink}" ${s}/>${[12, 26, 40].map((x) => `<path d="M${x} 24 L${x} 46" stroke="${ink}" stroke-width="1.5"/><circle cx="${x}" cy="34" r="2.6" fill="var(--card)" stroke="${ink}" stroke-width="1.5"/><circle cx="${x}" cy="44" r="2.6" fill="var(--card)" stroke="${ink}" stroke-width="1.5"/>`).join('')}${[12, 26, 40].map((x) => `<circle cx="${x}" cy="20" r="3.8" fill="var(--card)" stroke="${ink}" stroke-width="2"/>`).join('')}<circle cx="54" cy="20" r="4" fill="${br}"/><path d="M44 54 L56 54 M52 50 L56 54 L52 58" stroke="${br}" ${s}/></svg>`;
+    if (id === 'juris')
+      return `<svg viewBox="0 0 64 64" aria-hidden="true">${[[32, 12], [52, 24], [50, 46], [32, 54], [13, 44], [13, 22]].map(([x, y]) => `<path d="M32 32 L${x} ${y}" stroke="${ink}" ${s}/>${dot([x, y])}`).join('')}<circle cx="32" cy="32" r="7" fill="${br}"/></svg>`;
+    return `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="6" fill="${br}"/></svg>`;
+  }
+
+  function pickModel(id) {
+    document.querySelectorAll('#model-list .model-card').forEach((c) => {
+      c.classList.toggle('on', c.dataset.nsmm === id);
+      c.setAttribute('aria-checked', String(c.dataset.nsmm === id));
+    });
+    $('#nj-create').disabled = !id;
+  }
+
   async function openModelPicker() {
     const list = $('#model-list');
     list.innerHTML = '<p class="small muted">Loading models…</p>';
+    $('#nj-title').value = '';
+    $('#nj-length').value = NSMM.DEFAULT_PLANNED_LENGTH;
+    $('#nj-setup').value = '';
+    $('#nj-create').disabled = true;
     $('#new-journey').showModal();
     const models = await NSMM.models();
     list.innerHTML = models
-      .map(
-        (m) => `<button type="button" class="model-card" data-nsmm="${esc(m.id)}"${m.status === 'live' ? '' : ' disabled'}>
-          <span class="model-name">${esc(m.name)}${m.status === 'live' ? '' : '<span class="pill">Coming soon</span>'}</span>
-          <span class="small muted">${esc(m.for)}</span>
-        </button>`
-      )
+      .map((m) => {
+        const live = m.status === 'live';
+        return `<button type="button" class="model-card" role="radio" aria-checked="false" data-nsmm="${esc(m.id)}"${live ? '' : ' disabled'}>
+          <span class="model-glyph">${modelGlyph(m.id)}</span>
+          <span class="model-text">
+            <span class="model-name">${esc(m.name)}${live ? '' : '<span class="pill">Coming soon</span>'}</span>
+            <span class="model-for">${esc(m.for)}</span>
+            ${m.flow ? `<span class="model-flow">${esc(m.flow)}</span>` : ''}
+          </span>
+        </button>`;
+      })
       .join('');
+    const first = models.find((m) => m.status === 'live');
+    pickModel(first ? first.id : null);
   }
 
   function openSettings() {

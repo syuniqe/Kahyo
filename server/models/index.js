@@ -18,7 +18,7 @@ export function getModel(id) {
   return MODELS.find((m) => m.id === (id || DEFAULT_MODEL)) || null;
 }
 
-// All the browser ever learns about the models: no phases, rules or prompts.
+// All the browser ever learns about the models: the picker's words, no rules or prompts.
 export function publicModels() {
-  return MODELS.map(({ id, name, for: forWork, status }) => ({ id, name, for: forWork, status }));
+  return MODELS.map(({ id, name, for: forWork, flow, status }) => ({ id, name, for: forWork, flow, status }));
 }

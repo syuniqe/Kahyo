@@ -4,7 +4,8 @@ export default {
   id: 'rhyme',
   name: 'Rhyme',
   status: 'coming-soon',
-  for: 'Poems, lyrics and songs.',
+  for: 'Songs and poems',
+  flow: 'Runs top to bottom through verses, chorus and bridge. A chorus can return.',
 
   map: {
     layout: 'top to bottom',

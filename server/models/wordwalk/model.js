@@ -7,7 +7,8 @@ export default {
   id: 'wordwalk',
   name: 'Wordwalk',
   status: 'live',
-  for: 'Stories: short fiction, novels, plays, screenplays, TV and film.',
+  for: 'Stories, novels, plays, screen, TV and film',
+  flow: 'Rises as a story line through Origin, Pandiculation, Max Span, Convergence and Conclusion.',
 
   // How the map is drawn.
   map: {

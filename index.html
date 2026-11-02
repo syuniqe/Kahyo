@@ -174,12 +174,20 @@
     </main>
   </div>
 
-  <dialog id="new-journey">
-    <h2>What are you writing?</h2>
-    <p class="small muted">Each Journey uses one model, chosen now. It stays with the Journey.</p>
-    <div id="model-list" class="model-list"></div>
-    <div class="actions">
+  <dialog id="new-journey" class="new-journey">
+    <h2>New Journey</h2>
+    <p class="small muted nj-sub">Pick the kind of work. Its model shapes the map, the stages and the notes Kahyo gives you.</p>
+    <span class="nj-label">What are you writing?</span>
+    <div id="model-list" class="model-list" role="radiogroup" aria-label="Model"></div>
+    <div class="nj-row">
+      <label class="nj-field"><span class="nj-label">Title</span><input id="nj-title" placeholder="Untitled Journey" autocomplete="off" /></label>
+      <label class="nj-field nj-length"><span class="nj-label">Planned length</span><span class="nj-unit"><input id="nj-length" type="number" min="12" max="300" step="1" /> Footsteps</span></label>
+    </div>
+    <label class="nj-field"><span class="nj-label">Setup <span class="nj-light">(optional) · the world and situation before the first Footstep</span></span><textarea id="nj-setup" rows="2"></textarea></label>
+    <div class="nj-foot">
+      <span class="nj-hint">The model stays with this Journey. Later you can make a derived copy in another model, and the original stays as it is.</span>
       <button class="ghost" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+      <button id="nj-create" class="primary" type="button">Create Journey</button>
     </div>
   </dialog>
 

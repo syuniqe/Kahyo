@@ -19,14 +19,14 @@ test('a Journey with no model is a Wordwalk Journey', () => {
 
 test('every model is defined in plain words', () => {
   for (const m of MODELS) {
-    for (const k of ['id', 'name', 'status', 'for']) assert.ok(typeof m[k] === 'string' && m[k], `${m.id}.${k}`);
+    for (const k of ['id', 'name', 'status', 'for', 'flow']) assert.ok(typeof m[k] === 'string' && m[k], `${m.id}.${k}`);
     assert.ok(m.map && m.map.layout && m.map.reads, `${m.id}.map`);
     assert.ok(Array.isArray(m.phases) && m.phases.length, `${m.id}.phases`);
   }
 });
 
-test('the browser only learns names and status', () => {
-  for (const m of publicModels()) assert.deepStrictEqual(Object.keys(m).sort(), ['for', 'id', 'name', 'status']);
+test('the browser only learns the picker words and status', () => {
+  for (const m of publicModels()) assert.deepStrictEqual(Object.keys(m).sort(), ['flow', 'for', 'id', 'name', 'status']);
 });
 
 test('the Worker routes by model', async () => {

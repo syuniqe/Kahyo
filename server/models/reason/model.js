@@ -4,7 +4,8 @@ export default {
   id: 'reason',
   name: 'Reason',
   status: 'coming-soon',
-  for: 'Studies, investigations, articles, research papers and theses.',
+  for: 'Articles, papers and theses',
+  flow: 'Runs left to right through Introduction, Literature, Methodology, Results & Inference and Conclusion.',
 
   map: {
     layout: 'horizontal, left to right',

@@ -4,7 +4,8 @@ export default {
   id: 'juris',
   name: 'Juris',
   status: 'coming-soon',
-  for: 'Lawyers: map how a case progresses and document every event in it.',
+  for: 'Legal case preparation',
+  flow: 'A map around the case: hearings and evidence, then what each one led to. Everything links back to the centre.',
 
   map: {
     layout: 'mind map',
