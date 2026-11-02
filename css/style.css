@@ -628,3 +628,4 @@ button.link:hover { color: var(--ink); }
 .danger-zone h3 { margin: 0 0 4px; font-size: 15px; }
 button.danger { color: var(--red); }
 @media (max-width: 640px) { .account-btn #account-name { display: none; } .account-btn { padding: 4px; } }
+.beta-pill { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 3px 8px; border-radius: 99px; background: var(--brand); color: #fff; margin-left: -4px; }
