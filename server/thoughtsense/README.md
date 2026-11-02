@@ -1,6 +1,6 @@
 # ThoughtSense Engine: read me
 
-ThoughtSense is Kahyo's shared maths layer. It turns thoughts into numbers that can be compared. It does **not** decide what those numbers mean: each NSMM does that. Wordwalk and a future Reason can read the same direction number with different rules.
+ThoughtSense is Kāhyo's shared maths layer. It turns thoughts into numbers that can be compared. It does **not** decide what those numbers mean: each NSMM does that. Wordwalk and a future Reason can read the same direction number with different rules.
 
 Exact formulas and their tests are in the private maths doc. This file explains what each part does.
 

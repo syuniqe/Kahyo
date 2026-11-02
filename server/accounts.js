@@ -5,6 +5,9 @@
 // Row level security in Supabase (see supabase/schema.sql) makes sure a person can
 // only ever read or change their own Journeys, whatever this file does.
 
+// The Terms a new account agrees to (terms.html). Recorded on the account at sign-up.
+const TERMS_VERSION = '2026-11-02';
+
 function fail(message, status) {
   return Object.assign(new Error(message), { status });
 }
@@ -101,10 +104,11 @@ export async function account(body, request, env) {
   const back = encodeURIComponent(origin + '/');
   switch (body.op) {
     case 'signup': {
+      if (body.terms !== true) throw fail('Please agree to the Terms and Conditions to sign up.', 400);
       const name = String(body.name || '').trim().slice(0, 80);
       const data = await supa(env, `/auth/v1/signup?redirect_to=${back}`, {
         method: 'POST',
-        body: { email: cleanEmail(body.email), password: cleanPassword(body.password), data: { name } },
+        body: { email: cleanEmail(body.email), password: cleanPassword(body.password), data: { name, terms_accepted_at: new Date().toISOString(), terms_version: TERMS_VERSION } },
       });
       // With email confirmation on, Supabase sends the link and returns no session yet.
       const s = session(data);

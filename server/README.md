@@ -1,6 +1,6 @@
-# Kahyo server: read me
+# Kāhyo server: read me
 
-Everything clever in Kahyo lives in this folder. It runs only inside the Cloudflare Worker (and in Node for tests). The browser never receives any of it: it sends Footsteps in and gets results back.
+Everything clever in Kāhyo lives in this folder. It runs only inside the Cloudflare Worker (and in Node for tests). The browser never receives any of it: it sends Footsteps in and gets results back.
 
 ## The layers
 

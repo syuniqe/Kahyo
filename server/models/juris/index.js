@@ -1,4 +1,10 @@
-// Juris: the NSMM that helps lawyers map and document a case. Coming soon.
+// Juris: definition + engine + prompts in one object.
 import definition from './model.js';
+import { scoreJourney, stagesFor, placeFor } from './rules.js';
+import { TASKS } from './prompts.js';
 
-export default { ...definition, engine: null, tasks: null };
+export default {
+  ...definition,
+  engine: { score: scoreJourney, stages: stagesFor, place: placeFor },
+  tasks: TASKS,
+};

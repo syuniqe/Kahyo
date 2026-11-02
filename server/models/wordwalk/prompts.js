@@ -58,7 +58,7 @@ export const TASKS = {
     const people = extractPeople(d.characters);
     const transcript = String(d.transcript || '');
     return {
-      prompt: `You are the extraction layer of Kahyo, a voice-first storytelling system based on the Wordwalk Model, a Narrative Storyline Mapping Model (NSMM), and its ThoughtSense Engine.
+      prompt: `You are the extraction layer of Kāhyo, a voice-first storytelling system based on the Wordwalk Model, a Narrative Storyline Mapping Model (NSMM), and its ThoughtSense Engine.
 A writer just spoke a fragment of their story out loud. Turn it into exactly ONE Footstep, however many sentences it has. Never split it: the writer decides that. Instead, set events_count to the number of separate story events it holds.
 The event is the writer's own words. Keep their wording; fix only grammar and drop filler ("um", "so basically"). Do not summarise, shorten or rephrase.
 Writers speak out of order and do not say where an idea goes. Read its content and decide where it belongs, then set place_after:
@@ -91,7 +91,7 @@ Writer's spoken fragment:
   // data: { plannedLength, main: [{id, event}] }
   stages(d) {
     return {
-      prompt: `You label the stages of a story being written in Kahyo (Wordwalk Journey Mapping). The story is unfinished: ${d.main.length} of about ${d.plannedLength} planned Footsteps are written.
+      prompt: `You label the stages of a story being written in Kāhyo (Wordwalk Journey Mapping). The story is unfinished: ${d.main.length} of about ${d.plannedLength} planned Footsteps are written.
 Stages, in order:
 - Origin: the world and characters before the story moves.
 - Pandiculation: the story stretches open: the inciting event and new threads.

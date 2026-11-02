@@ -5,9 +5,9 @@ An **NSMM** (Narrative Structure Mapping Model) is a model for one kind of work.
 | Model | For | Map | Status |
 | --- | --- | --- | --- |
 | [Wordwalk](wordwalk/README.md) | Stories: fiction, novels, plays, screen, TV and film | Rising line | Live |
-| [Rhyme](rhyme/README.md) | Poems, lyrics and songs | Top to bottom | Coming soon |
-| [Reason](reason/README.md) | Studies, articles, research papers and theses | Horizontal, left to right | Coming soon |
-| [Juris](juris/README.md) | Lawyers mapping and documenting a case | Mind map of circular nodes around the case | Coming soon |
+| [Rhyme](rhyme/README.md) | Poems, lyrics and songs | Top to bottom | Live (beta) |
+| [Reason](reason/README.md) | Studies, articles, research papers and theses | Horizontal, left to right | Live (beta) |
+| [Juris](juris/README.md) | Lawyers mapping and documenting a case | Mind map of circular nodes around the case | Live (beta) |
 
 ## What a model is made of
 

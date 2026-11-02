@@ -118,7 +118,7 @@ function directionStatus(degrees, limit, judged) {
 //   a = clamp(log2(m / usual), −1, 1)   (+1 = a Jump, double the usual; −1 = a Crawl)
 //   length = √(b² + (a/2)²)   (magnitude weighs half as much as direction)
 // A lot in the same direction is a Jump (length ≤ ½); a lot in a strange direction is
-// a branch: Kahyo suggests one when the length reaches 1.
+// a branch: Kāhyo suggests one when the length reaches 1.
 const MAGNITUDE_WEIGHT = 0.5;
 function intentOf(degrees, limit, m, usual) {
   const b = degrees / limit;

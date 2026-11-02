@@ -1,7 +1,7 @@
-// Kahyo's Cloudflare Worker: serves the app and runs the ThoughtSense Engine, the
+// Kāhyo's Cloudflare Worker: serves the app and runs the ThoughtSense Engine, the
 // NSMMs and their prompts, so none of them ever reaches the browser.
 //   POST /api/engine  { op: 'models' }                         → the model list for the picker
-//   POST /api/engine  { op: 'score' | 'stages', nsmm?, ... }   → engine results
+//   POST /api/engine  { op: 'score' | 'stages' | 'place', nsmm?, ... }   → engine results
 //   POST /api/ai      { task, data, nsmm?, provider, model, baseUrl } + header X-Kahyo-Key → { result, model }
 //   POST /api/account { op: 'config' | 'signup' | 'login' | ... }  accounts (beta, see accounts.js)
 //   POST /api/journeys { op: 'list' | 'get' | 'put' | 'delete' }  Journeys saved to the account
@@ -46,6 +46,10 @@ async function engine(request) {
   if (body.op === 'models') return reply({ models: publicModels() });
   if (body.op === 'score') return reply(modelFor(body).engine.score(body));
   if (body.op === 'stages') return reply(modelFor(body).engine.stages(body));
+  if (body.op === 'place') {
+    const m = modelFor(body);
+    return reply(m.engine.place ? m.engine.place(body) : {});
+  }
   return reply({ error: 'Unknown engine call.' }, 400);
 }
 

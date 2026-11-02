@@ -4,8 +4,8 @@
 set -e
 rm -rf dist
 mkdir dist
-cp -r index.html learn.html css js assets vendor dist/
-for f in nsmm llm account app sample; do
+cp -r index.html learn.html terms.html css js assets vendor dist/
+for f in nsmm llm account app sample samples-nsmm; do
   npx --yes terser@5.31.6 "js/$f.js" --compress --mangle --toplevel --comments false -o "dist/js/$f.js" \
     || echo "warning: could not minify js/$f.js, shipping it as is"
 done

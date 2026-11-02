@@ -1,4 +1,4 @@
-// Kahyo accounts (beta). Talks only to Kahyo's Worker (/api/account, /api/journeys),
+// Kāhyo accounts (beta). Talks only to Kāhyo's Worker (/api/account, /api/journeys),
 // which talks to Supabase. Keeps the session in this browser and renews it before it
 // runs out, so a writer stays logged in until they log out.
 
@@ -8,20 +8,31 @@
   let state = load();
   const listeners = [];
 
+  // Remember me: the session is kept in this browser until logging out. Without it,
+  // it lasts only until the browser is closed. Passwords are never stored by Kāhyo;
+  // the browser's own password manager offers to save them.
+  const REMEMBER = 'kahyo.remember';
+  let remember = true;
+  try {
+    remember = localStorage.getItem(REMEMBER) !== 'no';
+  } catch {}
+
   function load() {
-    try {
-      const s = JSON.parse(localStorage.getItem(KEY));
-      return s && s.session && s.user ? s : null;
-    } catch {
-      return null;
+    for (const box of [() => localStorage, () => sessionStorage]) {
+      try {
+        const s = JSON.parse(box().getItem(KEY));
+        if (s && s.session && s.user) return s;
+      } catch {}
     }
+    return null;
   }
 
   function store(next) {
     state = next;
     try {
-      if (next) localStorage.setItem(KEY, JSON.stringify(next));
-      else localStorage.removeItem(KEY);
+      localStorage.removeItem(KEY);
+      sessionStorage.removeItem(KEY);
+      if (next) (remember ? localStorage : sessionStorage).setItem(KEY, JSON.stringify(next));
     } catch {}
     listeners.forEach((fn) => fn(state && state.user));
   }
@@ -35,7 +46,7 @@
         body: JSON.stringify(body),
       });
     } catch {
-      throw Object.assign(new Error('Kahyo is offline. Check your connection.'), { offline: true });
+      throw Object.assign(new Error('Kāhyo is offline. Check your connection.'), { offline: true });
     }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw Object.assign(new Error(data.error || 'Something went wrong. Try again.'), { status: res.status });
@@ -109,8 +120,24 @@
     fromLink,
     user: () => state && state.user,
     onChange: (fn) => listeners.push(fn),
-    async signUp(name, email, password) {
-      const d = await post('/api/account', { op: 'signup', name, email, password });
+    // Remember me, and the last email used to log in on this device.
+    remembered() {
+      let email = '';
+      try {
+        email = localStorage.getItem('kahyo.email') || '';
+      } catch {}
+      return { remember, email };
+    },
+    setRemember(on, email) {
+      remember = Boolean(on);
+      try {
+        localStorage.setItem(REMEMBER, remember ? 'yes' : 'no');
+        if (remember && email) localStorage.setItem('kahyo.email', email);
+        else localStorage.removeItem('kahyo.email');
+      } catch {}
+    },
+    async signUp(name, email, password, terms) {
+      const d = await post('/api/account', { op: 'signup', name, email, password, terms: Boolean(terms) });
       return { user: signedIn(d), confirm: d.confirm };
     },
     async logIn(email, password) {

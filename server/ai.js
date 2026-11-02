@@ -45,7 +45,7 @@ async function failure(res, model, label) {
     const err = await res.json();
     msg = err.error?.message || err.message || msg;
   } catch {}
-  if (isBusy(res.status, msg)) msg = `${model} is busy right now (high demand). Kahyo tried again and tried another model; wait a minute and press Add again. (${msg})`;
+  if (isBusy(res.status, msg)) msg = `${model} is busy right now (high demand). Kāhyo tried again and tried another model; wait a minute and press Add again. (${msg})`;
   else if (res.status === 429) msg = 'Rate limit reached. Wait a minute and try again. (' + msg + ')';
   if (res.status === 401 || res.status === 403) msg = `${label} refused the key. Check it in AI config. (${msg})`;
   const err = new Error(msg);
@@ -89,7 +89,7 @@ async function gemini(model, body, key) {
   return data.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text).join('') || '';
 }
 
-// Returns { text, model }: model is set when Kahyo had to switch for good (retired).
+// Returns { text, model }: model is set when Kāhyo had to switch for good (retired).
 async function geminiRun(cfg, body) {
   const model = cfg.model || DEFAULT_MODEL;
   try {
@@ -115,7 +115,7 @@ async function geminiRun(cfg, body) {
 
 // ---------- Claude ----------
 
-// Kahyo's tasks are short extractions, so effort is low. If Claude declines a request,
+// Kāhyo's tasks are short extractions, so effort is low. If Claude declines a request,
 // the server-side fallback answers it on another model.
 async function claudeRun(cfg, prompt) {
   const client = new Anthropic({ apiKey: cfg.key, maxRetries: 2 });

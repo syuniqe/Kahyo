@@ -1,4 +1,4 @@
-// The browser side of the ThoughtSense Engine. The maths runs on Kahyo's server
+// The browser side of the ThoughtSense Engine. The maths runs on Kāhyo's server
 // (the Cloudflare Worker); this file only names the stages, keeps the offline
 // word vectors, and asks the server to score a Journey.
 
@@ -62,10 +62,10 @@
     try {
       res = await fetch('/api/engine', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     } catch {
-      throw new Error('Kahyo could not reach its server. Check your connection; your Journey is saved in this browser.');
+      throw new Error('Kāhyo could not reach its server. Check your connection; your Journey is saved in this browser.');
     }
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `Kahyo's server said ${res.status}.`);
+    if (!res.ok) throw new Error(data.error || `Kāhyo's server said ${res.status}.`);
     return data;
   }
 
@@ -86,6 +86,14 @@
       promises: f.promises || [],
       environment: f.environment || [],
       intensity: Number.isFinite(f.intensity) ? f.intensity : null,
+      // Rhyme, Reason and Juris read these; Wordwalk ignores them.
+      section: f.section || null,
+      phase: f.phase || null,
+      role: f.role || null,
+      source: f.source || '',
+      kind: f.kind || null,
+      date: f.date || '',
+      parent: f.parent === undefined ? null : f.parent,
       e64,
     };
   }
@@ -114,6 +122,7 @@
       plannedLength: j.plannedLength,
       stage: j.stage,
       from,
+      edges: (j.edges || []).filter((e) => e.type !== 'temporal'),
       footsteps: items.map((x, i) => (i < from ? { ...x, known: pick(j.footsteps[i].metrics) } : x)),
     });
     lastSent.set(key, { sig });
@@ -123,6 +132,11 @@
   // → { after: how many main Footsteps before stages are labelled, labels: by position }
   function stages(count, plannedLength, nsmm) {
     return call({ op: 'stages', nsmm, count, plannedLength });
+  }
+
+  // Offline reading of a new point for Rhyme, Reason and Juris (its section, phase or kind).
+  function place(nsmm, text) {
+    return call({ op: 'place', nsmm, text });
   }
 
   // The models (NSMMs) for the New Journey picker: [{ id, name, for, status }].
@@ -138,5 +152,5 @@
     }
   }
 
-  root.NSMM = { STAGES, stageName, DEFAULT_PLANNED_LENGTH, monotonicStages, localEmbedding, score, stages, models };
+  root.NSMM = { STAGES, stageName, DEFAULT_PLANNED_LENGTH, monotonicStages, localEmbedding, score, stages, place, models };
 })(window);

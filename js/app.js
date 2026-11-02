@@ -1,4 +1,4 @@
-// Kahyo demo app: Journeys home → voice → Footsteps → Journey graph → continuity checks → helper draft.
+// Kāhyo demo app: Journeys home → voice → Footsteps → Journey graph → continuity checks → helper draft.
 
 (function () {
   const $ = (sel) => document.querySelector(sel);
@@ -21,6 +21,13 @@
   // Each link type has its own colour; casual links are also dashed.
   const LINK_DASHES = { casual: [7, 5], rejoin: [6, 4] };
   const LILAC = '#9b72d9';
+  // Wordwalk's legend, made before the flow models add their own link types.
+  const WORDWALK_LEGEND =
+      '<span class="legend-geo">On course climbs at 35° · the line turns by its direction · line length = magnitude · circle size = intensity · click a link to delete it</span>' +
+      Object.values(EDGE_TYPES)
+        .map((t, i) => `<span><i class="line ${Object.keys(EDGE_TYPES)[i]}" style="--c:${t.color}"></i>${t.label}</span>`)
+        .join('') +
+      '<span><i class="ring over"></i>Off course</span><span><i class="ring wander"></i>Wandering or drifting</span><span><i class="ring branch"></i>Side path (fades as it opens wide)</span><span><i class="ring heavy"></i>Jump</span><span><i class="ring broken"></i>Trait break</span>';
   const OLD_EDGE = { causal: 'cause', setup_resolution: 'cause', thematic: 'casual' };
   const OLD_STRICTNESS = { strict: 0.9, moderate: 0.6, flexible: 0.3, off: 0 };
   // Graph geometry: 0° points right. A Footstep's line leaves the one before it at
@@ -37,6 +44,7 @@
   let charView = null;
   let busy = false;
   let stageMarks = [];
+  let flowMarks = null;
   let nodeSet = null;
 
   // ---------- persistence: one record per Journey, plus an index ----------
@@ -224,7 +232,7 @@
     el.hidden = !account;
     el.dataset.state = state;
     el.textContent = { saving: 'Saving…', saved: 'Saved', offline: 'Not synced' }[state] || '';
-    el.title = msg || { saving: 'Saving to your account', saved: 'Saved to your account', offline: 'Saved on this device. Kahyo will sync it to your account when it can.' }[state];
+    el.title = msg || { saving: 'Saving to your account', saved: 'Saved to your account', offline: 'Saved on this device. Kāhyo will sync it to your account when it can.' }[state];
   }
 
   async function push() {
@@ -250,7 +258,7 @@
       .catch((e) => {
         console.warn('Could not sync', e);
         if (e.status === 401) return signedOut();
-        setSync('offline', e.offline ? undefined : 'Could not save to your account: ' + e.message + ' Kahyo will try again.');
+        setSync('offline', e.offline ? undefined : 'Could not save to your account: ' + e.message + ' Kāhyo will try again.');
         schedulePush(15000);
       })
       .finally(() => {
@@ -667,7 +675,8 @@
   async function addThought(transcript, preExtracted, placeAfter) {
     transcript = transcript.trim();
     if (!transcript) return;
-    const extracted = preExtracted || (LLM.hasKey() ? await LLM.run('extract', extractData(transcript)) : offlineExtract(transcript));
+    if (isFlow()) return addPoint(transcript, preExtracted, placeAfter);
+    const extracted = preExtracted || (LLM.hasKey() ? await aiRun('extract', extractData(transcript)) : offlineExtract(transcript));
     let items = (extracted.footsteps || []).filter((f) => f && f.event);
     // A spoken idea becomes one Footstep. If the AI returned several anyway, join them.
     if (!preExtracted && items.length > 1) {
@@ -723,7 +732,7 @@
     // Where the new Footsteps go: the writer's pick, else the model's, else the end.
     // Picking a side-path Footstep continues that side path.
     let anchor = placeAfter && placeAfter !== 'AUTO' ? placeAfter : String(extracted.place_after || 'END').trim();
-    // Left to Kahyo and headed for the end: an idea that reads like an open side path goes there.
+    // Left to Kāhyo and headed for the end: an idea that reads like an open side path goes there.
     let guessed = null;
     if ((!placeAfter || placeAfter === 'AUTO') && anchor === 'END' && items.length === 1) {
       guessed = closerSidePath(vecs[0], (items[0].subjects || []).map(String));
@@ -840,7 +849,604 @@
     // Quiet notes: a dot on the Footstep and a count on the Notes tab, no interruption.
     const flagged = journey.alerts.filter((a) => a.open && newIds.includes(a.fsId)).length;
     const where = onBranchAt ? ` It reads like the side path at ${pathStart(fsById(onBranchAt)).id}, so it continues that path. Pick "At the end of the main story" in Place it if you meant the main story.` : '';
-    setStatus(`Added ${items.length} Footstep${items.length > 1 ? 's' : ''}.${where}${flagged ? ` Kahyo left ${flagged} note${flagged > 1 ? 's' : ''} in the margin.` : ''}`, 'ok');
+    setStatus(`Added ${items.length} Footstep${items.length > 1 ? 's' : ''}.${where}${flagged ? ` Kāhyo left ${flagged} note${flagged > 1 ? 's' : ''} in the margin.` : ''}`, 'ok');
+  }
+
+  // ---------- Rhyme, Reason and Juris ----------
+  // The three models share Kāhyo's pipeline but have their own fields, maps and notes.
+  // Their maths runs on the server; the server sends back statuses and notes.
+
+  const isFlow = () => Boolean(journey && journey.nsmm && journey.nsmm !== 'wordwalk');
+  const aiRun = (task, data) => LLM.run(task, data, journey?.nsmm);
+  const PHASES = ['Introduction', 'Literature', 'Methodology', 'Results & Inference', 'Conclusion'];
+  const KINDS = ['filing', 'hearing', 'order', 'evidence', 'outcome'];
+  const KIND_WORDS = { filing: 'Filing', hearing: 'Hearing', order: 'Order', evidence: 'Evidence', outcome: 'What happened' };
+  const FLOW = {
+    rhyme: {
+      map: 'Song map',
+      placeholder: 'Speak a line, or type a verse. Kāhyo keeps one line or image per Footstep. Start with "Chorus:" to name the section.',
+      health: { quiet: 'Just starting', ok: 'On theme', wander: 'Wandering a little', drift: 'Drifting from the theme' },
+      legend: 'Reads top to bottom · each band is a section · a line leans by how far it strays from the theme · ↺ marks a chorus line that returns · circle size = intensity · dashed = set aside',
+    },
+    reason: {
+      map: 'Paper map',
+      placeholder: 'Say a point, a finding or a source. One claim per Footstep. Start with "Method:" to name the phase.',
+      health: { quiet: 'Just starting', ok: 'On topic', wander: 'A little loose', drift: 'Drifting off topic' },
+      legend: 'Reads left to right · each phase has its main point on the line and its work beneath · dashed purple = outside the plan · orange dashed = a finding relies on a method · circle size = how much it matters',
+    },
+    juris: {
+      map: 'Case map',
+      placeholder: 'Say what happened: a hearing, an order, a piece of evidence. One point per Footstep.',
+      legend: 'The case sits in the centre · level 1 (inner ring) = filings, hearings, orders and evidence, clockwise by date · level 2 = what happened and what it led to · dashed purple = relates to evidence · hover a node to read it',
+    },
+  };
+  const FLOW_NOTES = ['aside', 'off-theme', 'repeat', 'split', 'meter', 'rhyme', 'chorus-changed', 'bridge-flat', 'unplanned', 'off-topic', 'answer', 'unsupported', 'source', 'empty', 'unlinked', 'far', 'dates', 'facts', 'evidence'];
+  Object.assign(EDGE_TYPES, {
+    relies: { label: 'Relies on', back: 'Supports', color: '#FD3A0A' },
+    relates: { label: 'Relates to evidence', back: 'Relates to evidence', color: LILAC },
+  });
+  Object.assign(LINK_DASHES, { relies: [5, 5], relates: [6, 5] });
+
+  // Reading order for scoring: Rhyme reads top to bottom, lines set aside last.
+  function flowOrder() {
+    if (journey.nsmm !== 'rhyme') return journey.footsteps;
+    const main = mainInOrder();
+    return [...main, ...journey.footsteps.filter((f) => f.thread !== 'main').sort((a, b) => a.created_at - b.created_at)];
+  }
+
+  function lastOf(field) {
+    const main = journey.nsmm === 'rhyme' ? mainInOrder() : journey.footsteps.filter((f) => f.thread === 'main');
+    for (let i = main.length - 1; i >= 0; i--) if (main[i][field]) return main[i][field];
+    return null;
+  }
+
+  // Rhyme: the next section of a kind gets the next number (Verse 3, Chorus 2).
+  function nextSection(kind) {
+    const names = new Set(mainInOrder().map((f) => f.section));
+    const used = [...names].filter((n) => n && n.toLowerCase().startsWith(kind.toLowerCase())).length;
+    if (kind === 'Verse') return `Verse ${used + 1}`;
+    return used ? `${kind} ${used + 1}` : kind;
+  }
+
+  function flowData(transcript) {
+    const base = { title: journey.title, setup: journey.setup || '', transcript };
+    if (journey.nsmm === 'rhyme') return { ...base, lines: mainInOrder().map((f) => ({ id: f.id, section: f.section, event: f.event })) };
+    const live = journey.footsteps.filter((f) => f.thread !== 'archived');
+    if (journey.nsmm === 'reason') return { ...base, points: live.map((f) => ({ id: f.id, phase: f.phase, role: f.metrics?.role || f.role, event: f.event })) };
+    return { ...base, nodes: live.map((f) => ({ id: f.id, kind: f.kind, date: f.date, parent: f.parent, event: f.event })) };
+  }
+
+  // Juris: where a point goes when Kāhyo decides: the node closest in meaning.
+  function closestNode(vec, skip) {
+    let best = null;
+    journey.footsteps
+      .filter((f) => f.thread !== 'archived' && f.id !== skip)
+      .forEach((f) => {
+        const c = cos(vec, f.embedding) + (f.parent === 'CASE' ? 0.05 : 0);
+        if (!best || c > best.c) best = { id: f.id, c };
+      });
+    return best ? best.id : 'CASE';
+  }
+
+  // Adds one point to a Rhyme, Reason or Juris Journey.
+  async function addPoint(transcript, pre, placeAfter, opts = {}) {
+    const nsmm = journey.nsmm;
+    const choice = placeAfter || 'AUTO';
+    let item = pre || null;
+    if (!item && LLM.hasKey()) {
+      setStatus('Reading it…');
+      const r = await aiRun('extract', flowData(transcript));
+      const xs = (r.footsteps || []).filter((x) => x && x.event);
+      item = xs.length > 1 ? { ...xs[0], event: xs.map((x) => x.event).join(' '), events_count: xs.length } : xs[0];
+    }
+    const reliable = Boolean(item);
+    if (!item) {
+      const p = await NSMM.place(nsmm, transcript);
+      const text = p.text || transcript;
+      const caps = (text.slice(1).match(/\b[A-Z][a-z]+\b/g) || []).filter((w) => !NAME_SKIP.has(w));
+      item = { event: text, section: p.section, phase: p.phase, kind: p.kind, date: p.date, subjects: nsmm === 'juris' ? [...new Set(caps)].slice(0, 4) : [] };
+    }
+    const event = String(item.event || '').trim();
+    if (!event) return setStatus('Nothing to add yet. Say a line or a point.', 'warn');
+    await ensureEmbedder();
+    const id = 'FS#' + String(journey.nextId++).padStart(3, '0');
+    const fs = {
+      id,
+      event: event[0].toUpperCase() + event.slice(1),
+      subjects: (item.subjects || []).map(String).filter(Boolean),
+      context: String(item.context || ''),
+      environment: (item.environment || []).map(String).filter(Boolean),
+      promises: [],
+      stage: null,
+      created_at: Date.now(),
+      transcript,
+      thread: 'main',
+      violations: [],
+    };
+    const events = Number(item.events_count);
+    if (Number.isFinite(events) && events > 1) fs.events = Math.round(events);
+    const ai = Number(item.intensity);
+    if (reliable && item.intensity !== undefined && item.intensity !== null && Number.isFinite(ai)) fs.intensity = clamp(ai, 0, 1);
+    [fs.embedding] = await embedTexts([fsText(fs)]);
+    let from = null; // the point a side path or aside leaves from
+
+    if (nsmm === 'rhyme') {
+      fs.section = /^(SEC|NEW):/.test(choice) ? choice.slice(4) : item.section || lastOf('section') || 'Verse 1';
+      if (choice === 'ASIDE' || item.aside) {
+        fs.thread = 'branch';
+        from = storyOrder()[storyOrder().length - 1];
+      }
+    }
+    if (nsmm === 'reason') {
+      fs.phase = choice.startsWith('PH:') ? choice.slice(3) : PHASES.includes(item.phase) ? item.phase : lastOf('phase') || 'Introduction';
+      const hasMain = journey.footsteps.some((f) => f.thread === 'main' && f.phase === fs.phase && f.role === 'main');
+      fs.role = hasMain ? 'work' : 'main';
+      if (String(item.source || '').trim()) fs.source = String(item.source).trim();
+      if (choice === 'SIDE' || item.unplanned) {
+        fs.thread = 'branch';
+        const inPhase = journey.footsteps.filter((f) => f.thread === 'main' && f.phase === fs.phase);
+        from = (inPhase[inPhase.length - 1] || journey.footsteps.filter((f) => f.thread === 'main').pop())?.id || null;
+        delete fs.role;
+      }
+      (item.supports || []).forEach((s) => fsById(s) && journey.edges.push({ from: s, to: id, type: 'relies' }));
+    }
+    if (nsmm === 'juris') {
+      fs.kind = KINDS.includes(item.kind) ? item.kind : 'outcome';
+      fs.date = String(item.date || '');
+      if (choice === 'CASE') fs.parent = 'CASE';
+      else if (choice.startsWith('UNDER:') && fsById(choice.slice(6))) fs.parent = choice.slice(6);
+      else if (pre && item.parent === null) fs.parent = null;
+      else if (item.parent === 'CASE' || fsById(item.parent)) fs.parent = item.parent;
+      else fs.parent = fs.kind === 'outcome' ? closestNode(fs.embedding, id) : 'CASE';
+      (item.relates_to || []).forEach((r) => fsById(r) && journey.edges.push({ from: r, to: id, type: 'relates' }));
+    }
+
+    journey.footsteps.push(fs);
+    if (fs.thread === 'main') placeInOrder(id, 'END');
+    else if (from) journey.edges.push({ from, to: id, type: 'temporal' });
+    if (opts.quiet) return id;
+    await rescoreAll();
+    syncNotes();
+    save();
+    renderAll({ fit: true });
+    selectFootstep(id);
+    const flagged = journey.alerts.filter((a) => a.open && a.fsId === id).length;
+    setStatus(`Added ${id}.${flagged ? ` Kāhyo left ${flagged} note${flagged > 1 ? 's' : ''} in the margin.` : ''}`, 'ok');
+    return id;
+  }
+
+  // The server's notes become margin notes; a note whose cause is gone closes itself.
+  function syncFlowNotes() {
+    const notes = journey.flowNotes || [];
+    const keys = new Set(notes.map((n) => n.kind + '|' + n.fsId));
+    journey.alerts
+      .filter((a) => a.open && FLOW_NOTES.includes(a.kind) && a.kind !== 'split' && !keys.has(a.kind + '|' + a.fsId))
+      .forEach((a) => ((a.open = false), (a.resolution = 'fixed')));
+    notes.forEach((n) => addNote({ ...n }));
+    journey.footsteps
+      .filter((f) => f.events > 1 && f.thread !== 'archived')
+      .forEach((f) => addNote({ kind: 'split', fsId: f.id, text: `${f.id} may hold ${f.events} ${journey.nsmm === 'rhyme' ? 'images' : 'points'} in one. Split it, or keep it as one?`, maths: `${f.events} in one` }));
+  }
+
+  async function createFlowSample(nsmm) {
+    const S = window.KAHYO_NSMM_SAMPLES[nsmm];
+    const id = window.KAHYO_NSMM_SAMPLES.id;
+    journey = newJourney(S.title, nsmm);
+    journey.setup = S.setup;
+    journey.plannedLength = Math.max(24, S.points.length + 8);
+    selectedId = null;
+    for (const p of S.points) {
+      const pre = {
+        ...p,
+        parent: p.parent === null ? null : typeof p.parent === 'number' ? id(p.parent) : p.parent,
+        supports: (p.supports || []).map(id),
+        relates_to: (p.relates || []).map(id),
+      };
+      const where = p.aside ? 'ASIDE' : p.unplanned ? 'SIDE' : nsmm === 'rhyme' ? 'SEC:' + p.section : nsmm === 'reason' ? 'PH:' + p.phase : 'AUTO';
+      await addPoint(p.event, pre, where, { quiet: true });
+    }
+    await rescoreAll();
+    syncNotes();
+    save();
+    go(journey.id);
+  }
+
+  // ---------- flow maps ----------
+
+  const rad = (d) => (d * Math.PI) / 180;
+
+  // Positions, background marks and lines for the three flow maps.
+  function flowLayout(visible) {
+    const pos = {};
+    const marks = { kind: journey.nsmm, bands: [], cols: [], rings: [], texts: [] };
+    const lines = [];
+    const vis = new Set(visible.map((f) => f.id));
+    const text = (f) => marks.texts.push({ id: f.id, full: f.event });
+
+    if (journey.nsmm === 'rhyme') {
+      let y = 0;
+      let band = null;
+      const order = storyOrder().filter((id) => vis.has(id));
+      order.forEach((id, i) => {
+        const f = fsById(id);
+        if (!band || band.name !== f.section) {
+          if (band) y += 34;
+          band = { name: f.section || 'Verse 1', y0: y - 38, y1: y + 32, returns: false };
+          marks.bands.push(band);
+        }
+        pos[id] = { x: 64 * Math.sin(rad(clamp(f.metrics?.direction ?? 0, -90, 90))), y };
+        band.y1 = y + 34;
+        if (f.metrics?.returnOf) band.returns = true;
+        text(f, 46);
+        if (i) lines.push({ from: order[i - 1], to: id, type: 'temporal', spine: true });
+        if (f.metrics?.returnOf && vis.has(f.metrics.returnOf)) lines.push({ from: id, to: f.metrics.returnOf, type: 'return' });
+        y += 76;
+      });
+      visible
+        .filter((f) => !pos[f.id])
+        .sort((a, b) => a.created_at - b.created_at)
+        .forEach((f, k) => {
+          const root = branchRoot(f);
+          const base = (root && pos[root.id]) || { x: 0, y };
+          pos[f.id] = { x: base.x + 360, y: base.y + 34 + 6 * k };
+          text(f, 30);
+          if (root && pos[root.id]) lines.push({ from: root.id, to: f.id, type: 'temporal', side: true });
+        });
+    }
+
+    if (journey.nsmm === 'reason') {
+      const COL = 330;
+      const main = visible.filter((f) => f.thread === 'main');
+      const roleOf = (f) => f.metrics?.role || f.role;
+      let prevMain = null;
+      PHASES.forEach((p, i) => {
+        const x = i * COL;
+        const inPhase = main.filter((f) => (f.metrics?.phase || f.phase) === p);
+        const head = inPhase.find((f) => roleOf(f) === 'main') || null;
+        const work = inPhase.filter((f) => f !== head);
+        marks.cols.push({ name: p, x, count: inPhase.length, empty: !inPhase.length });
+        if (head) {
+          pos[head.id] = { x, y: 0 };
+          text(head, 34);
+          if (prevMain) lines.push({ from: prevMain, to: head.id, type: 'temporal', spine: true });
+          prevMain = head.id;
+        }
+        let above = head ? head.id : null;
+        work.forEach((f, k) => {
+          pos[f.id] = { x, y: 84 * (k + 1) };
+          text(f, 34);
+          if (above) lines.push({ from: above, to: f.id, type: 'temporal', drop: true });
+          above = f.id;
+        });
+      });
+      const depth = Math.max(1, ...main.map((f) => (pos[f.id]?.y || 0) / 84));
+      visible
+        .filter((f) => !pos[f.id])
+        .sort((a, b) => a.created_at - b.created_at)
+        .forEach((f, k) => {
+          const root = branchRoot(f);
+          const base = (root && pos[root.id]) || { x: 0, y: 0 };
+          pos[f.id] = { x: base.x + COL / 2, y: 84 * (depth + 1.3) + 40 * k };
+          text(f, 26);
+          if (root && pos[root.id]) lines.push({ from: root.id, to: f.id, type: 'temporal', side: true });
+        });
+      marks.depth = 84 * (depth + 2);
+    }
+
+    if (journey.nsmm === 'juris') {
+      const R1 = 230;
+      const STEP = 135;
+      const live = visible;
+      const ids = new Set(live.map((f) => f.id));
+      const kids = {};
+      live.forEach((f) => {
+        const p = f.parent === 'CASE' || ids.has(f.parent) ? f.parent : null;
+        if (p) (kids[p] = kids[p] || []).push(f);
+      });
+      const when = (f) => f.date || f.metrics?.date || '9999';
+      const sorted = (xs) => [...xs].sort((a, b) => when(a).localeCompare(when(b)) || a.created_at - b.created_at);
+      pos.CASE = { x: 0, y: 0 };
+      const placed = new Set();
+      const place = (f, angle, span, depth) => {
+        if (placed.has(f.id)) return;
+        placed.add(f.id);
+        const r = R1 + (depth - 1) * STEP;
+        pos[f.id] = { x: r * Math.cos(rad(angle)), y: r * Math.sin(rad(angle)) };
+        const ks = sorted(kids[f.id] || []);
+        ks.forEach((k, i) => place(k, angle - span / 2 + (span * (i + 0.5)) / ks.length, span / Math.max(1, ks.length) + (depth === 1 ? span * 0.25 : 0), depth + 1));
+      };
+      const first = sorted(kids.CASE || []);
+      const slice = 360 / Math.max(1, first.length);
+      first.forEach((f, k) => place(f, -90 + slice * k, slice * 0.85, 1));
+      marks.rings = [R1, R1 + STEP, R1 + 2 * STEP].filter((r, i) => live.some((f) => placed.has(f.id) && Math.hypot(pos[f.id].x, pos[f.id].y) > r - 5) || i === 0);
+      live
+        .filter((f) => !placed.has(f.id))
+        .forEach((f, k) => {
+          pos[f.id] = { x: -R1 - 170, y: R1 + 40 + 56 * k };
+          marks.loose = true;
+        });
+      live.forEach((f) => {
+        if (placed.has(f.id)) lines.push({ from: f.parent, to: f.id, type: 'tree' });
+      });
+    }
+    return { pos, marks, lines };
+  }
+
+  // Background of a flow map: section bands, phase columns or the case's rings.
+  function drawFlowMarks(ctx, k) {
+    const M = flowMarks;
+    if (!M) return;
+    const head = cssVar('--head');
+    const muted = cssVar('--muted');
+    const band = cssVar('--card2') || 'rgba(0,0,0,0.04)';
+    ctx.save();
+    ctx.font = `600 ${12 * k}px Manrope, system-ui, sans-serif`;
+    if (M.kind === 'rhyme') {
+      M.bands.forEach((b, i) => {
+        ctx.globalAlpha = i % 2 ? 0.55 : 0.25;
+        ctx.fillStyle = band;
+        ctx.fillRect(-260, b.y0, 860, b.y1 - b.y0);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = head;
+        ctx.textAlign = 'left';
+        ctx.fillText(b.name + (b.returns ? ' ↺' : ''), -240, b.y0 + 24 * Math.min(1, k));
+      });
+    }
+    if (M.kind === 'reason') {
+      M.cols.forEach((c) => {
+        ctx.globalAlpha = 0.45;
+        ctx.fillStyle = band;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(c.x - 40, -90, 290, M.depth + 90, 16);
+        else ctx.rect(c.x - 40, -90, 290, M.depth + 90);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = c.empty ? muted : head;
+        ctx.textAlign = 'left';
+        ctx.fillText(c.name, c.x - 20, -58);
+        if (c.empty) {
+          ctx.setLineDash([4, 4]);
+          ctx.strokeStyle = muted;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(c.x, 0, 14, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = `italic ${11 * k}px Manrope, system-ui, sans-serif`;
+          ctx.fillText('not yet', c.x, 34);
+          ctx.font = `600 ${12 * k}px Manrope, system-ui, sans-serif`;
+        }
+      });
+    }
+    if (M.kind === 'juris') {
+      ctx.strokeStyle = muted;
+      ctx.globalAlpha = 0.35;
+      ctx.setLineDash([3, 6]);
+      M.rings.forEach((r) => {
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
+  // Rhyme and Reason write each line beside its circle; Juris keeps the map clean.
+  function drawFlowTexts(ctx) {
+    const M = flowMarks;
+    if (!M || !M.texts.length || !network) return;
+    const pos = network.getPositions(M.texts.map((t) => t.id));
+    // Written in map units, so the words grow and shrink with the map like the circles.
+    const wrap = M.kind === 'reason' ? 28 : 60;
+    // At least 11px on screen however far the map is zoomed out.
+    const size = 11 * Math.max(1.25, 1 / Math.max(0.2, network.getScale()));
+    ctx.save();
+    ctx.font = `italic ${size}px Manrope, system-ui, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = cssVar('--node-font');
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = cssVar('--bg2');
+    M.texts.forEach((t) => {
+      const p = pos[t.id];
+      if (!p) return;
+      const r = nodeSet.get(t.id)?.size || 10;
+      const lines = [];
+      t.full.split(/\s+/).forEach((w) => {
+        const last = lines[lines.length - 1];
+        if (last !== undefined && (last + ' ' + w).length <= wrap) lines[lines.length - 1] = last + ' ' + w;
+        else lines.push(w);
+      });
+      const shown = lines.slice(0, 2);
+      if (lines.length > 2) shown[1] = shortText(shown[1] + '…', wrap);
+      shown.forEach((ln, i) => {
+        const y = p.y + size * 0.35 + (i - (shown.length - 1) / 2) * size * 1.2;
+        ctx.strokeText(ln, p.x + r + 10, y);
+        ctx.fillText(ln, p.x + r + 10, y);
+      });
+    });
+    ctx.restore();
+  }
+
+  // The lines of a flow map as vis edges.
+  function flowEdges(lines, C) {
+    const typed = journey.edges.filter((e) => ['relies', 'relates'].includes(e.type));
+    const all = [...lines, ...typed.map((e) => ({ ...e, index: journey.edges.indexOf(e) }))];
+    return all
+      .filter((e) => (e.from === 'CASE' || fsById(e.from)) && fsById(e.to) && fsById(e.to).thread !== 'archived' && (e.from === 'CASE' || fsById(e.from).thread !== 'archived'))
+      .map((e, i) => {
+        const typedLink = e.index !== undefined;
+        return {
+          id: typedLink ? 'j' + e.index : 'f' + i,
+          from: e.from,
+          to: e.to,
+          arrows: e.spine || e.side ? { to: { enabled: true, scaleFactor: 0.6 } } : typedLink ? { to: { enabled: true, scaleFactor: 0.5 } } : undefined,
+          color: { color: typedLink ? EDGE_TYPES[e.type].color : e.type === 'return' ? LILAC : e.side ? LILAC : C.order, opacity: e.type === 'tree' ? 0.7 : 0.9 },
+          dashes: typedLink ? LINK_DASHES[e.type] : e.side || e.type === 'return' ? [6, 4] : false,
+          width: e.spine ? 2.5 : e.type === 'tree' ? 2 : 1.6,
+          title: typedLink ? EDGE_TYPES[e.type].label : e.type === 'return' ? 'Same chorus line' : '',
+          smooth: typedLink || e.type === 'return' ? { type: e.type === 'return' ? 'curvedCCW' : 'curvedCW', roundness: e.type === 'return' ? 0.5 : 0.3 } : e.side ? { type: 'curvedCW', roundness: 0.2 } : false,
+        };
+      });
+  }
+
+  // Inspect stats, the health pill and the rail under the map, for a flow Journey.
+  function renderFlowStats() {
+    const info = journey.engine || {};
+    const live = journey.footsteps.filter((f) => f.thread !== 'archived');
+    const open = journey.alerts.filter((a) => a.open).length;
+    const stat = (v, word, cls = '') => `<div class="${cls}"><span>${v}</span>${word}</div>`;
+    const count = (fn) => live.filter((f) => f.metrics && fn(f.metrics)).length;
+    const side = journey.footsteps.filter((f) => f.thread === 'branch').length;
+    const nsmm = journey.nsmm;
+    let health = { level: 'quiet', label: 'Just starting', why: 'Kāhyo judges direction once there are a few points.' };
+    if (nsmm === 'juris') {
+      const loose = info.loose || 0;
+      health = loose ? { level: 'drift', label: `${loose} loose point${loose > 1 ? 's' : ''}`, why: `${loose} point${loose > 1 ? 's do' : ' does'} not lead back to the case.` } : { level: live.length ? 'ok' : 'quiet', label: live.length ? 'All linked' : 'Just starting', why: 'Every point leads back to the case.' };
+    } else if (nsmm === 'reason' && side) {
+      health = { level: 'wander', label: `${side} side path${side > 1 ? 's' : ''}`, why: `${side} point${side > 1 ? 's' : ''} happened outside the plan.` };
+    } else if (info.health) {
+      const words = FLOW[nsmm].health;
+      health = { level: info.health, label: words[info.health], why: info.health === 'ok' ? 'Recent points stay close.' : 'Some recent points stray from the rest.' };
+    }
+    const hb = $('#health');
+    hb.className = 'health ' + health.level;
+    hb.innerHTML = `<i></i>${esc(health.label)}`;
+    hb.title = health.why;
+    $('#health-why').innerHTML = `<strong>${esc(health.label)}.</strong> ${esc(health.why)}`;
+    $('#stats').innerHTML =
+      stat(live.filter((f) => f.thread === 'main').length, nsmm === 'rhyme' ? 'lines' : nsmm === 'reason' ? 'points' : 'points in the case') +
+      stat(side, nsmm === 'rhyme' ? 'set aside' : nsmm === 'reason' ? 'outside the plan' : 'loose') +
+      stat(open, 'open notes', open ? 'warn' : '') +
+      stat(count((m) => m.dirStatus === 'off'), nsmm === 'rhyme' ? 'off theme' : nsmm === 'reason' ? 'off topic' : 'far from the case') +
+      stat(`${count((m) => m.dirStatus === 'wander')} / ${count((m) => m.dirStatus === 'drifting')}`, 'wandering / drifting') +
+      stat((info.tf ?? 0.35).toFixed(2), 'terminancy factor');
+    $('#tf').value = info.tf ?? 0.35;
+    $('#tf-val').textContent = (info.tf ?? 0.35).toFixed(2);
+    $('#tf-note').textContent = 'Sets how far a point may stray before Kāhyo notes it. Each section or phase scales it.';
+    let rail = '';
+    if (nsmm === 'rhyme') {
+      const secs = info.sections || [];
+      rail = secs.map((s, i) => `<li class="${i === secs.length - 1 ? 'now' : 'done'}">${esc(s.name)}${s.returns ? ' ↺' : ''}<small> · ${s.count}</small></li>`).join('') || '<li class="pending">Verse 1</li><li class="pending">Chorus</li><li class="pending">Bridge</li>';
+    }
+    if (nsmm === 'reason') {
+      const ph = info.phases || PHASES.map((name) => ({ name, count: 0 }));
+      const last = ph.reduce((k, p, i) => (p.count ? i : k), -1);
+      rail = ph.map((p, i) => `<li class="${!p.count ? 'pending' : i === last ? 'now' : 'done'}">${esc(p.name)}${p.count ? `<small> · ${p.count}</small>` : ''}</li>`).join('');
+    }
+    if (nsmm === 'juris') {
+      const c = info.counts || {};
+      rail = KINDS.map((k) => `<li class="${c[k] ? 'done' : 'pending'}">${KIND_WORDS[k]}${c[k] ? `<small> · ${c[k]}</small>` : ''}</li>`).join('') + '<li class="rail-note">Every Footstep leads back to the case in the centre</li>';
+    }
+    $('#rail').innerHTML = rail;
+    $('#alert-count').textContent = open ? String(open) : '';
+    $('#alert-count').className = open ? 'count' : '';
+  }
+
+  // Place it: where the next point goes, in the model's own words.
+  function renderFlowPlaceOptions(sel) {
+    const keep = sel.value || 'AUTO';
+    const opt = (v, t) => `<option value="${esc(v)}">${esc(t)}</option>`;
+    let html = opt('AUTO', 'Let Kāhyo decide');
+    if (journey.nsmm === 'rhyme') {
+      const cur = lastOf('section');
+      if (cur) html += opt('SEC:' + cur, `Continue ${cur}`);
+      ['Verse', 'Chorus', 'Bridge', 'Outro'].forEach((k) => (html += opt('NEW:' + nextSection(k), `Start ${nextSection(k)}`)));
+      html += opt('ASIDE', 'Set it aside');
+    }
+    if (journey.nsmm === 'reason') {
+      PHASES.forEach((p) => (html += opt('PH:' + p, `In ${p}`)));
+      html += opt('SIDE', 'Outside the plan (side path)');
+    }
+    if (journey.nsmm === 'juris') {
+      html += opt('CASE', 'On the case (filing, hearing, order, evidence)');
+      journey.footsteps.filter((f) => f.thread !== 'archived').forEach((f) => (html += opt('UNDER:' + f.id, `What came of ${f.id} · ${shortText(f.event, 34)}`)));
+    }
+    sel.innerHTML = html;
+    sel.value = [...sel.options].some((o) => o.value === keep) ? keep : 'AUTO';
+  }
+
+  // The model's own fields in the Footstep panel.
+  function flowFields(f) {
+    if (!isFlow()) return '';
+    const sel = (field, options, value) => `<select data-flow="${field}">${options.map(([v, t]) => `<option value="${esc(v)}"${String(value) === String(v) ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+    if (journey.nsmm === 'rhyme')
+      return `<label class="field"><span>Section<small class="mword">verse, chorus, bridge, outro</small></span><input data-flow="section" value="${esc(f.section || '')}" /></label>`;
+    if (journey.nsmm === 'reason')
+      return `<label class="field"><span>Phase<small class="mword">left to right</small></span>${sel('phase', PHASES.map((p) => [p, p]), f.phase)}</label>
+        <label class="field"><span>Role<small class="mword">main point on the line, or work beneath</small></span>${sel('role', [['main', 'Main point of the phase'], ['work', 'Work beneath it']], f.metrics?.role || f.role || 'work')}</label>
+        <label class="field"><span>Source<small class="mword">citation</small></span><input data-flow="source" value="${esc(f.source || '')}" placeholder="Author year, or a link" /></label>`;
+    const others = journey.footsteps.filter((x) => x.id !== f.id && x.thread !== 'archived');
+    return `<label class="field"><span>Kind<small class="mword">level 1 or what happened</small></span>${sel('kind', KINDS.map((k) => [k, KIND_WORDS[k]]), f.kind)}</label>
+      <label class="field"><span>Date<small class="mword">YYYY-MM-DD</small></span><input data-flow="date" value="${esc(f.date || '')}" placeholder="2024-06-04" /></label>
+      <label class="field"><span>Attached to<small class="mword">leads back to the case</small></span>${sel('parent', [['', 'Nothing yet (loose)'], ['CASE', 'The case'], ...others.map((x) => [x.id, `${x.id} ${shortText(x.event, 30)}`])], f.parent || '')}</label>`;
+  }
+
+  function editFlowField(f, field, value) {
+    remember(`edit ${f.id}`);
+    const v = String(value).trim();
+    if (field === 'role' && v === 'main') journey.footsteps.filter((x) => x !== f && x.phase === f.phase && x.role === 'main').forEach((x) => (x.role = 'work'));
+    if (field === 'parent') f.parent = v || null;
+    else f[field] = v;
+    run(async () => {
+      await rescoreAll();
+      syncNotes();
+      save();
+      renderAll();
+      setStatus(`Updated ${f.id}.`, 'ok');
+    });
+  }
+
+  // Helper draft for the three flow models.
+  async function flowDraft() {
+    const live = journey.footsteps.filter((f) => f.thread !== 'archived');
+    if (!live.length) return setStatus('Add some Footsteps first.', 'warn');
+    const nsmm = journey.nsmm;
+    let data;
+    let outline;
+    if (nsmm === 'rhyme') {
+      const sections = [];
+      mainInOrder().forEach((f) => {
+        if (!sections.length || sections[sections.length - 1].name !== f.section) sections.push({ name: f.section, lines: [] });
+        sections[sections.length - 1].lines.push(f.event);
+      });
+      const asides = live.filter((f) => f.thread === 'branch').map((f) => f.event);
+      data = { title: journey.title, setup: journey.setup || '', sections, asides };
+      outline = sections.map((s) => `## ${s.name}\n\n${s.lines.join('  \n')}`).join('\n\n') + (asides.length ? `\n\n## Set aside\n\n${asides.join('  \n')}` : '');
+    } else if (nsmm === 'reason') {
+      const main = live.filter((f) => f.thread === 'main');
+      const phases = PHASES.map((p) => {
+        const inP = main.filter((f) => f.phase === p);
+        const head = inP.find((f) => (f.metrics?.role || f.role) === 'main');
+        return { name: p, main: head?.event || '', work: inP.filter((f) => f !== head).map((f) => f.event + (f.source ? ` (${f.source})` : '')), sources: inP.map((f) => f.source).filter(Boolean) };
+      });
+      const sidePaths = live.filter((f) => f.thread === 'branch').map((f) => f.event);
+      data = { title: journey.title, setup: journey.setup || '', phases, sidePaths };
+      outline = phases.map((p) => `## ${p.name}\n\n${p.main ? `**${p.main}**\n\n` : '_Not yet._\n\n'}${p.work.map((w) => `- ${w}`).join('\n')}`).join('\n\n') + (sidePaths.length ? `\n\n## Outside the plan\n\n${sidePaths.map((s) => `- ${s}`).join('\n')}` : '');
+    } else {
+      const date = (f) => f.date || f.metrics?.date || '';
+      const first = live.filter((f) => f.parent === 'CASE').sort((a, b) => date(a).localeCompare(date(b)));
+      const under = (id) => live.filter((f) => f.parent === id);
+      const deep = (id) => under(id).flatMap((f) => [f, ...deep(f.id)]);
+      const evidenceOf = (id) => journey.edges.filter((e) => e.type === 'relates' && [id, ...deep(id).map((x) => x.id)].includes(e.to)).map((e) => fsById(e.from)?.event).filter(Boolean);
+      const events = first.map((f) => ({ id: f.id, kind: f.kind, date: date(f), event: f.event, outcomes: deep(f.id).map((x) => x.event), evidence: evidenceOf(f.id) }));
+      const loose = live.filter((f) => !f.metrics?.linked).map((f) => f.event);
+      data = { title: journey.title, setup: journey.setup || '', events, loose };
+      outline =
+        `## Chronology\n\n${events.map((e) => `- **${e.date || '[date?]'} · ${KIND_WORDS[e.kind] || e.kind}:** ${e.event}${e.outcomes.length ? `\n    - ${e.outcomes.join('\n    - ')}` : ''}`).join('\n')}` +
+        (loose.length ? `\n\n## Loose points\n\n${loose.map((l) => `- ${l}`).join('\n')}` : '') +
+        '\n\n_Kāhyo helps you organise a case. It is not legal advice._';
+    }
+    if (!LLM.hasKey()) journey.draft = `# ${journey.title}\n\n_Helper outline from your Footsteps. Add an AI key in AI config for a fuller draft._\n\n${outline}`;
+    else {
+      setStatus('Building a helper draft from every Footstep…');
+      journey.draft = await aiRun('draft', data);
+    }
+    save();
+    renderDraftPanel();
+    showTab('draft');
+    setStatus('Helper draft ready.', 'ok');
   }
 
   // ---------- notes ----------
@@ -859,6 +1465,7 @@
   // reaches the stage limit (main story or side path), Jump / Crawl on the main story,
   // and one terminancy note at the end of a side path that has opened too wide.
   function syncNotes(ids) {
+    if (isFlow()) return syncFlowNotes();
     const tf = tfValue();
     journey.footsteps
       .filter((f) => f.metrics && f.thread !== 'archived' && (!ids || ids.includes(f.id)))
@@ -940,7 +1547,7 @@
         return addNote({
           kind: 'drifting',
           fsId: f.id,
-          text: `The side path ending at ${f.id} is drifting from the main story. Kahyo is letting it drift and fading it as it goes. Keep letting it drift, or lean its next step back toward the story.`,
+          text: `The side path ending at ${f.id} is drifting from the main story. Kāhyo is letting it drift and fading it as it goes. Keep letting it drift, or lean its next step back toward the story.`,
           maths: '',
         });
       if (f.metrics.branch !== 'terminate') return;
@@ -971,7 +1578,7 @@
   // One signal for the writer instead of six numbers.
   function storyHealth() {
     const { recent, off, wander, drifting } = recentOffCourse();
-    if (recent.length < 3) return { level: 'quiet', label: 'Just starting', why: 'Kahyo judges direction from the 4th Footstep on.' };
+    if (recent.length < 3) return { level: 'quiet', label: 'Just starting', why: 'Kāhyo judges direction from the 4th Footstep on.' };
     if (drifting) return { level: 'drift', label: 'Drifting', why: `${off.length} of your last ${recent.length} main Footsteps are drifting or off course.` };
     if (off.length + wander.length >= 2) return { level: 'wander', label: 'Wandering a little', why: `${off.length + wander.length} of your last ${recent.length} main Footsteps wander from where the story is heading.` };
     return { level: 'ok', label: 'On course', why: `Your last ${recent.length} Footsteps follow the main story.` };
@@ -980,6 +1587,7 @@
   // The drift note is raised once per drift; "It's on purpose" pauses it until
   // more Footsteps are written.
   function checkDrift() {
+    if (isFlow()) return;
     const { recent, off, drifting } = recentOffCourse();
     if (!drifting) return;
     const count = journey.footsteps.length;
@@ -1002,6 +1610,8 @@
   // the whole story and labels each Footstep (every 3 new Footsteps, to save the
   // free quota), with a position-based fallback offline.
   async function relabelStages(allowAI) {
+    // Rhyme, Reason and Juris have no stages: their sections, phases and kinds are the flow.
+    if (isFlow()) return rescoreAll();
     const main = mainInOrder();
     const n = main.length;
     let plan;
@@ -1050,22 +1660,22 @@
   }
 
   async function aiStages(main) {
-    const res = await LLM.run('stages', { plannedLength: journey.plannedLength, main: main.map((f) => ({ id: f.id, event: f.event })) });
+    const res = await aiRun('stages', { plannedLength: journey.plannedLength, main: main.map((f) => ({ id: f.id, event: f.event })) });
     const byId = Object.fromEntries((res.stages || []).map((s) => [s.id, NSMM.stageName(s.stage)]));
     let prev = NSMM.STAGES[0];
     return main.map((f) => (prev = NSMM.STAGES.includes(byId[f.id]) ? byId[f.id] : prev));
   }
 
-  // Re-score every Footstep on Kahyo's server (the ThoughtSense Engine runs there).
+  // Re-score every Footstep on Kāhyo's server (the ThoughtSense Engine runs there).
   // A newer call wins: an older answer that comes back late is dropped.
   let scoreRun = 0;
   async function rescoreAll() {
     const mine = ++scoreRun;
     const j = journey;
-    const footsteps = j.footsteps.map((f) => ({ ...f, pathStart: f.thread === 'branch' ? pathStart(f).id : null }));
+    const footsteps = (isFlow() ? flowOrder() : j.footsteps).map((f) => ({ ...f, pathStart: f.thread === 'branch' ? pathStart(f).id : null }));
     let out;
     try {
-      out = await NSMM.score({ key: j, nsmm: j.nsmm, footsteps, tf: Number.isFinite(j.tf) ? j.tf : null, plannedLength: j.plannedLength, stage: j.stage });
+      out = await NSMM.score({ key: j, nsmm: j.nsmm, footsteps, edges: j.edges, tf: Number.isFinite(j.tf) ? j.tf : null, plannedLength: j.plannedLength, stage: j.stage });
     } catch (e) {
       setStatus(e.message, 'warn');
       return false;
@@ -1073,6 +1683,7 @@
     if (mine !== scoreRun || journey !== j) return false;
     j.footsteps.forEach((f) => (f.metrics = out.metrics[f.id] ? { ...f.metrics, ...out.metrics[f.id] } : f.metrics));
     j.engine = out.info;
+    j.flowNotes = out.notes || null;
     return true;
   }
 
@@ -1100,7 +1711,7 @@
     let parts = null;
     if (LLM.hasKey()) {
       setStatus('Splitting ' + id + ' into two Footsteps…');
-      const r = await LLM.run('split', { event: f.event, context: f.context, subjects: f.subjects, promises: f.promises, environment: f.environment });
+      const r = await aiRun('split', { event: f.event, context: f.context, subjects: f.subjects, promises: f.promises, environment: f.environment });
       if (Array.isArray(r.footsteps) && r.footsteps.length >= 2) parts = r.footsteps.slice(0, 2);
     }
     if (!parts) {
@@ -1117,7 +1728,7 @@
         if (a.split(/\s+/).length >= 3 && b.split(/\s+/).length >= 3) break;
         a = b = null;
       }
-      if (!a) return setStatus('Kahyo could not find a natural place to split this one offline. Edit the event text instead.', 'warn');
+      if (!a) return setStatus('Kāhyo could not find a natural place to split this one offline. Edit the event text instead.', 'warn');
       const who = (s) => (f.subjects || []).filter((x) => s.toLowerCase().includes(x.toLowerCase().split(/\s+/).pop()));
       parts = [
         { event: a, subjects: who(a).length ? who(a) : f.subjects, context: f.context, promises: [], environment: f.environment },
@@ -1140,6 +1751,7 @@
       if (Number.isFinite(Number(p.intensity)) && p.intensity !== undefined) x.intensity = clamp(Number(p.intensity), 0, 1);
       else delete x.intensity;
     });
+    if (g.role === 'main') g.role = 'work';
     journey.footsteps.splice(journey.footsteps.indexOf(f) + 1, 0, g);
     journey.edges.filter((e) => e.from === f.id).forEach((e) => (e.from = g.id));
     if (f.thread === 'main') placeInOrder(g.id, f.id);
@@ -1167,7 +1779,7 @@
     let found = [];
     if (LLM.hasKey()) {
       setStatus(`Reading the story for how ${c.name} looks…`);
-      const r = await LLM.run('physical', { name: c.name, texts });
+      const r = await aiRun('physical', { name: c.name, texts });
       found = r.physical || [];
     } else {
       found = [...new Set(texts.flatMap((t) => offlinePhysical(t, c.name)))];
@@ -1213,7 +1825,7 @@
     if (!fs || !c) return;
     if (!LLM.hasKey()) return setStatus('Remolding needs an AI key. Edit the event yourself, or loosen the character.', 'warn');
     setStatus(`Remolding ${fs.id} so ${c.name} stays true to "${a.trait}"…`);
-    const r = await LLM.run('remold', { name: c.name, trait: a.trait, event: fs.event, suggestion: a.suggestion || '' });
+    const r = await aiRun('remold', { name: c.name, trait: a.trait, event: fs.event, suggestion: a.suggestion || '' });
     if (!r.event) throw new Error('The AI did not return a rewrite. Try again.');
     fs.event = String(r.event);
     fs.violations = fs.violations.filter((v) => !(v.character === c.name && v.trait === a.trait));
@@ -1279,6 +1891,7 @@
   // ---------- helper draft ----------
 
   async function renderDraft() {
+    if (isFlow()) return flowDraft();
     const main = mainInOrder();
     if (!main.length) return setStatus('Add some Footsteps first.', 'warn');
     const branches = journey.footsteps.filter((f) => f.thread === 'branch');
@@ -1298,7 +1911,7 @@
       setStatus('Building a helper draft from every Footstep…');
       // Grounded on purpose: the draft may only use what the writer said.
       // Anything missing becomes a [question] for the writer, never invented.
-      const raw = await LLM.run('draft', {
+      const raw = await aiRun('draft', {
         title: journey.title,
         setup: journey.setup || '',
         characters: characterData(),
@@ -1327,7 +1940,7 @@
     const list = listIds().map((id) => readJourney(id)).filter(Boolean).sort((a, b) => b.updated - a.updated);
     const el = $('#journey-list');
     if (!list.length) {
-      el.innerHTML = `<div class="empty-home"><img src="assets/kahyo-mark-256.png" alt="" /><p>No Journeys yet.</p><p class="muted">Start a new one and speak your first idea, or open the sample story to see how Kahyo maps it.</p></div>`;
+      el.innerHTML = `<div class="empty-home"><img src="assets/kahyo-mark-256.png" alt="" /><p>No Journeys yet.</p><p class="muted">Start a new one and speak your first idea, or open the sample story to see how Kāhyo maps it.</p></div>`;
       return;
     }
     el.innerHTML = list
@@ -1363,7 +1976,7 @@
     $('#menu').hidden = true;
     renderBadge();
     renderHome();
-    document.title = 'Kahyo · Your Journeys';
+    document.title = 'Kāhyo · Your Journeys';
   }
 
   function openJourney(j) {
@@ -1449,8 +2062,13 @@
   function renderAll(opts = {}) {
     if (!journey || $('#journey-view').hidden) return;
     $('#journey-title').value = journey.title;
-    document.title = journey.title + ' · Kahyo';
+    document.title = journey.title + ' · Kāhyo';
     $('#planned').value = journey.plannedLength;
+    const flow = FLOW[journey.nsmm];
+    $('.graph-head h2').textContent = flow ? flow.map : 'Story map';
+    $('#transcript').placeholder = flow ? flow.placeholder : 'Speak, or type here. Fix any words the mic got wrong before you add it.';
+    $('#char-toggle').style.display = flow ? 'none' : '';
+    $('#legend').innerHTML = flow ? `<span class="legend-geo">${esc(flow.legend)}</span>` : WORDWALK_LEGEND;
     renderGraph(opts);
     renderStats();
     renderCharacters();
@@ -1481,6 +2099,7 @@
   // Positions: each main Footstep is placed from the one before it by its own
   // vector. Side paths leave the Footstep they grew from by their own vector.
   function layout(visible) {
+    if (isFlow()) return flowLayout(visible).pos;
     const pos = {};
     let x = 0;
     let y = 0;
@@ -1557,7 +2176,7 @@
       if (!shown.some((q) => Math.abs(q.x - p.x) < room && Math.abs(q.y - p.y) < room * 0.45)) shown.push({ id, ...p });
     });
     const keep = new Set(shown.map((q) => q.id));
-    nodeSet.update(ids.map((id) => ({ id, font, label: keep.has(id) ? id : '' })));
+    nodeSet.update(ids.map((id) => ({ id, font, label: id === 'CASE' ? 'Case' : keep.has(id) ? id : '' })));
   }
 
   function renderGraph(opts = {}) {
@@ -1577,7 +2196,9 @@
     const order = storyOrder();
     const num = {};
     order.forEach((id, i) => (num[id] = i + 1));
-    const pos = layout(visible);
+    const fl = isFlow() ? flowLayout(visible) : null;
+    flowMarks = fl ? fl.marks : null;
+    const pos = fl ? fl.pos : layout(visible);
 
     const nodes = visible.map((f) => {
       const hasViolation = f.violations?.some((v) => v);
@@ -1612,11 +2233,28 @@
         opacity: fade(f),
       };
     });
+    if (journey.nsmm === 'juris') {
+      // The case sits in the centre; evidence is lilac, loose points are dashed red.
+      nodes.forEach((n) => {
+        const f = fsById(n.id);
+        const m = f.metrics || {};
+        n.size = 7 + 14 * (m.weight ?? intensityOf(f)) * (m.level === 1 ? 1.25 : 1);
+        if (m.kind === 'evidence' || f.kind === 'evidence') n.color.background = '#c9b6ef';
+        if (m.linked === false) {
+          n.shapeProperties = { borderDashes: [4, 3] };
+          n.color.border = C.red;
+        }
+        n.title = `${f.id}${f.date ? ` · ${f.date}` : ''} · ${KIND_WORDS[m.kind || f.kind] || ''}\n${f.event}${m.linked === false ? '\nnot linked to the case' : ''}`;
+      });
+      nodes.push({ id: 'CASE', x: 0, y: 0, fixed: true, label: 'Case', shape: 'dot', size: 30, color: { background: '#dbe46a', border: C.border, highlight: { background: '#dbe46a', border: '#FD3A0A' }, hover: { background: '#dbe46a', border: '#FD3A0A' } }, borderWidth: 2.5, font: labelFont(1), title: `${journey.title}${journey.setup ? '\n' + journey.setup : ''}` });
+    }
+    if (journey.nsmm === 'rhyme') nodes.forEach((n) => fsById(n.id)?.metrics?.returnOf && (n.shapeProperties = { borderDashes: [3, 3] }));
     const ids = new Set(visible.map((f) => f.id));
+    if (fl) ids.add('CASE');
     const spine = order.slice(1).map((id, i) => ({ from: order[i], to: id, type: 'temporal', spine: true }));
     const typed = journey.edges.filter((e) => !(e.type === 'temporal' && num[e.from] && num[e.to]));
     const edges = [...spine.map((e, i) => ({ ...e, key: 's' + i })), ...typed.map((e) => ({ ...e, key: 'j' + journey.edges.indexOf(e) }))]
-      .filter((e) => ids.has(e.from) && ids.has(e.to))
+      .filter((e) => !fl && ids.has(e.from) && ids.has(e.to))
       .map((e) => {
         const to = fsById(e.to);
         const vecLine = e.spine || (e.type === 'temporal' && to.thread !== 'main');
@@ -1638,12 +2276,14 @@
         };
       });
 
+    if (fl) edges.push(...flowEdges(fl.lines, C));
+
     // Stage names sit above the first Footstep of each stage.
     stageMarks = [];
     let last = null;
     order.forEach((id) => {
       const f = fsById(id);
-      if (f.stage && f.stage !== last) stageMarks.push({ ...pos[id], stage: f.stage, lift: 0 });
+      if (!fl && f.stage && f.stage !== last) stageMarks.push({ ...pos[id], stage: f.stage, lift: 0 });
       last = f.stage;
     });
     // Stage names that would touch the one before are lifted a row.
@@ -1665,7 +2305,7 @@
         interaction: { hover: true, tooltipDelay: 150, dragNodes: false },
       });
       network.on('click', (p) => {
-        if (p.nodes.length) selectFootstep(p.nodes[0]);
+        if (p.nodes.length && p.nodes[0] !== 'CASE') selectFootstep(p.nodes[0]);
         else if (!p.edges.length) closeDrawer();
       });
       network.on('zoom', scaleLabels);
@@ -1675,6 +2315,7 @@
         const k = 1 / Math.max(0.2, network.getScale());
         const kinds = {};
         journey.alerts.filter((a) => a.open && nodeSet?.get(a.fsId)).forEach((a) => (kinds[a.fsId] = kinds[a.fsId] === 'trait' ? 'trait' : a.kind));
+        drawFlowTexts(ctx);
         const pos = network.getPositions(Object.keys(kinds));
         ctx.save();
         Object.entries(pos).forEach(([id, p]) => {
@@ -1697,6 +2338,11 @@
         ctx.save();
         // Keep stage names readable at any zoom.
         const k = 1 / Math.max(0.2, network.getScale());
+        if (flowMarks) {
+          ctx.restore();
+          drawFlowMarks(ctx, k);
+          return;
+        }
         ctx.font = `600 ${11 * k}px Manrope, system-ui, sans-serif`;
         ctx.lineWidth = k;
         const head = cssVar('--head');
@@ -1761,6 +2407,7 @@
 
   function renderPlaceOptions() {
     const sel = $('#place');
+    if (isFlow()) return renderFlowPlaceOptions(sel);
     const keep = sel.value || 'AUTO';
     const order = mainInOrder();
     // Side-path tips: the last Footstep on each side path that has not ended.
@@ -1768,7 +2415,7 @@
       (f) => f.thread === 'branch' && !closed(pathStart(f)) && !journey.edges.some((e) => e.from === f.id && e.type === 'temporal' && fsById(e.to)?.thread === 'branch')
     );
     sel.innerHTML =
-      `<option value="AUTO">Let Kahyo decide</option><option value="END">At the end of the main story</option><option value="START">At the very start</option>` +
+      `<option value="AUTO">Let Kāhyo decide</option><option value="END">At the end of the main story</option><option value="START">At the very start</option>` +
       order.map((f, i) => `<option value="${esc(f.id)}">After ${i + 1}. ${esc(shortText(f.event, 40))}</option>`).join('') +
       tips.map((f) => `<option value="${esc(f.id)}">Continue side path after ${esc(f.id)}</option>`).join('');
     sel.value = [...sel.options].some((o) => o.value === keep) ? keep : 'AUTO';
@@ -1776,6 +2423,7 @@
 
   // Storyline (Inspect): the factors, the planned length and the story's stats.
   function renderStats() {
+    if (isFlow()) return renderFlowStats();
     const main = journey.footsteps.filter((f) => f.thread === 'main');
     const branches = journey.footsteps.filter((f) => f.thread === 'branch');
     const open = journey.alerts.filter((a) => a.open).length;
@@ -1849,7 +2497,7 @@
         <div class="field strict">
           <span>Strictness<small class="mword">how firmly the traits hold</small></span>
           <div class="slider-row"><input class="strictness" type="range" min="0" max="1" step="0.1" value="${c.strictness ?? 0.6}" aria-label="Strictness" /><b class="strict-val">${(c.strictness ?? 0.6).toFixed(1)}</b></div>
-          <p class="muted small">Higher means ${esc(c.name)} is less likely to change. When they act against a trait, Kahyo notes it and can remold the Footstep to fit.</p>
+          <p class="muted small">Higher means ${esc(c.name)} is less likely to change. When they act against a trait, Kāhyo notes it and can remold the Footstep to fit.</p>
         </div>
         ${
           journey.characters.length > 1
@@ -1915,6 +2563,23 @@
     'rejoin-ask': 'Does a side path rejoin here?',
     terminate: 'Side path at its limit',
     drift: 'The story is drifting',
+    aside: 'Set it aside?',
+    'off-theme': 'Wandered off theme',
+    meter: 'Line length',
+    rhyme: 'Breaks the rhyme',
+    'chorus-changed': 'Lines that rely on this changed',
+    'bridge-flat': 'The bridge does not turn',
+    unplanned: 'Something outside the plan',
+    'off-topic': 'Off topic',
+    answer: 'Does it answer the question?',
+    unsupported: 'Finding without a method',
+    source: 'Source missing',
+    empty: 'Phase is empty',
+    unlinked: 'Not linked to the case',
+    far: 'Far from the case',
+    dates: 'Dates out of order',
+    facts: 'Facts disagree',
+    evidence: 'Evidence not used yet',
     terminancy: 'Moved to a side path',
     contradiction: 'Points against the story',
     heavy: 'Holds a lot',
@@ -1947,6 +2612,20 @@
         return b('dismiss', "It's on purpose");
       case 'heavy':
         return b('split', 'Split in two') + b('accept', 'Keep as one');
+      case 'aside':
+        return b('branch', 'Set it aside') + b('accept', 'Keep it in');
+      case 'unplanned':
+        return b('branch', 'Keep as side path') + b('accept', `Fold into ${fs?.phase || 'the phase'}`);
+      case 'chorus-changed':
+        return b('change', 'Update the first chorus') + b('accept', 'Keep them different');
+      case 'unlinked':
+        return b('change', 'Attach it') + b('remove', 'Remove');
+      case 'facts':
+        return b('change', 'Show both') + b('accept', 'They differ on purpose');
+      case 'dates':
+      case 'unsupported':
+      case 'source':
+        return b('change', 'Fix it') + b('accept', 'Clear');
       case 'terminancy':
         return fs?.thread === 'branch' ? b('keep', 'Bring into main story') + b('accept', 'Clear') : b('accept', 'Clear');
       default:
@@ -1971,10 +2650,14 @@
     const list = journey.alerts.filter((a) => a.open);
     $('#clear-notes').hidden = list.length < 2;
     if (!list.length) {
-      el.innerHTML = '<p class="muted">No notes right now. When a Footstep wanders off course, jumps or crawls, a character acts out of character, or a side path goes too far, Kahyo leaves a quiet note here. Notes stay until you clear them.</p>';
+      if (isFlow()) {
+        el.innerHTML = `<p class="muted">No notes right now. When something needs a look, Kāhyo leaves a quiet note here. Notes stay until you clear them.</p>${journey.nsmm === 'juris' ? '<p class="small muted">Kāhyo helps you organise a case. It is not legal advice.</p>' : ''}`;
+        return;
+      }
+      el.innerHTML = '<p class="muted">No notes right now. When a Footstep wanders off course, jumps or crawls, a character acts out of character, or a side path goes too far, Kāhyo leaves a quiet note here. Notes stay until you clear them.</p>';
       return;
     }
-    el.innerHTML = list.map(noteHtml).join('');
+    el.innerHTML = list.map(noteHtml).join('') + (journey.nsmm === 'juris' ? '<p class="small muted">Kāhyo helps you organise a case. It is not legal advice.</p>' : '');
   }
 
   // The Footstep in a writer's words.
@@ -1988,7 +2671,7 @@
     if (!m.limit || f.thread !== 'main') return '';
     const size = m.sizeFlag === 'jump' ? 'A Jump: a lot happens at once' : m.sizeFlag === 'crawl' ? 'A Crawl: little happens' : 'A usual-sized step';
     const dir = { on: 'on course', wander: 'that wanders a little', drifting: 'that is drifting', off: 'that goes off course' }[m.dirStatus] || 'on course';
-    return `${size}, ${dir}.${m.branchHint ? ' Kahyo suggests branching it.' : ''}`;
+    return `${size}, ${dir}.${m.branchHint ? ' Kāhyo suggests branching it.' : ''}`;
   }
 
   // Where this side path meets the main story again, if it does.
@@ -2022,7 +2705,8 @@
     const notes = journey.alerts.filter((a) => a.open && a.fsId === f.id);
     el.innerHTML = `
       <div class="fs-head"><strong>${pos >= 0 ? `#${pos + 1} · ` : ''}${esc(f.id)}</strong><span class="pill ${f.thread}">${f.thread === 'branch' ? 'side path' : f.thread}</span><span class="pill">${esc(f.stage || 'unstaged')}</span></div>
-      <label class="field"><span>What happens<small class="mword">event · your words</small></span><textarea data-edit="event" rows="3">${esc(f.event)}</textarea></label>
+      <label class="field"><span>${isFlow() ? (journey.nsmm === 'rhyme' ? 'The line' : 'The point') : 'What happens'}<small class="mword">event · your words</small></span><textarea data-edit="event" rows="3">${esc(f.event)}</textarea></label>
+      ${flowFields(f)}
       <label class="field"><span>Who<small class="mword">characters</small></span><input data-edit="subjects" value="${esc((f.subjects || []).join(', '))}" placeholder="Comma separated" /></label>
       <label class="field"><span>Where<small class="mword">environment</small></span><input data-edit="environment" value="${esc((f.environment || []).join(', '))}" placeholder="The place or space where it happens" /></label>
       <label class="field"><span>When and how<small class="mword">context</small></span><input data-edit="context" value="${esc(f.context || '')}" placeholder="Time, circumstances" /></label>
@@ -2063,9 +2747,9 @@
     }
     el.innerHTML = `
       <div class="actions">
-        ${f.thread === 'main' ? `<button data-place-after="${esc(f.id)}">Add next idea after this</button><button data-shift="-1" aria-label="Move earlier in the story">↑ Earlier</button><button data-shift="1" aria-label="Move later in the story">↓ Later</button>` : ''}
+        ${f.thread === 'main' && journey.nsmm !== 'juris' && journey.nsmm !== 'reason' ? `<button data-place-after="${esc(f.id)}">Add next idea after this</button><button data-shift="-1" aria-label="Move earlier in the story">↑ Earlier</button><button data-shift="1" aria-label="Move later in the story">↓ Later</button>` : ''}
         ${f.thread === 'branch' ? `<button data-place-after="${esc(f.id)}">Continue this side path</button>${rejoinPicker(f)}` : ''}
-        ${f.thread !== 'main' ? `<button data-move="main">Bring into main story</button>` : `<button data-move="branch">Make it a side path</button>`}
+        ${journey.nsmm === 'juris' ? '' : f.thread !== 'main' ? `<button data-move="main">${journey.nsmm === 'rhyme' ? 'Bring it back in' : 'Bring into main story'}</button>` : `<button data-move="branch">${journey.nsmm === 'rhyme' ? 'Set it aside' : 'Make it a side path'}</button>`}
         <button data-split class="${f.metrics?.sizeFlag === 'jump' ? 'primary' : ''}">Split in two</button>
         <button data-move="archived">Set aside</button>
         <button data-delete class="ghost">Delete</button>
@@ -2328,7 +3012,7 @@
   // ---------- events ----------
 
   // Loader: draws the logo's strokes one after another like a pen, holds the
-  // finished mark for a moment, then starts again while Kahyo is working.
+  // finished mark for a moment, then starts again while Kāhyo is working.
   let scribbleFrame = null;
   function scribble(on) {
     cancelAnimationFrame(scribbleFrame);
@@ -2388,7 +3072,7 @@
 
   // ---------- undo ----------
 
-  // Before each change Kahyo keeps a copy of the Journey (the last 20, this session only).
+  // Before each change Kāhyo keeps a copy of the Journey (the last 20, this session only).
   let undoStack = [];
   function remember(label) {
     if (!journey) return;
@@ -2564,7 +3248,16 @@
       go(journey.id);
       if (!title) setTimeout(() => $('#journey-title').select(), 50);
     });
-    $('#h-sample').addEventListener('click', () => run(createSample));
+    $('#h-sample').addEventListener('click', () => $('#sample-menu').toggleAttribute('hidden'));
+    $('#sample-menu').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-sample]');
+      if (!b) return;
+      $('#sample-menu').hidden = true;
+      run(() => (b.dataset.sample === 'wordwalk' ? createSample() : createFlowSample(b.dataset.sample)));
+    });
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#sample-menu, #h-sample')) $('#sample-menu').hidden = true;
+    });
     $('#h-import').addEventListener('click', () => $('#import-file').click());
     $('#journey-list').addEventListener('click', (e) => {
       const b = e.target.closest('[data-del-journey]');
@@ -2707,6 +3400,7 @@
     $('#detail').addEventListener('change', (e) => {
       const f = fsById(selectedId);
       if (f && e.target.dataset.edit) editFootstep(f, e.target.dataset.edit, e.target.value);
+      if (f && e.target.dataset.flow) editFlowField(f, e.target.dataset.flow, e.target.value);
     });
     $('#detail').addEventListener('submit', (e) => {
       e.preventDefault();
@@ -2785,7 +3479,7 @@
             throw new Error('Could not read that file. Pick the .kahyo.json file you exported.');
           }
           const j = normalize(data);
-          if (!j) throw new Error('That file is not a Kahyo Journey. Pick the .kahyo.json file you exported.');
+          if (!j) throw new Error('That file is not a Kāhyo Journey. Pick the .kahyo.json file you exported.');
           journey = { ...j, id: uid(), embedder: null };
           try {
             await ensureEmbedder();
@@ -2845,7 +3539,7 @@
         await rescoreAll();
         save();
         renderAll();
-        setStatus(LLM.hasKey() ? `${LLM.providerLabel()} connected. Kahyo will now extract Footsteps with AI.` : 'No-AI mode. Footsteps are split by sentence.', 'ok');
+        setStatus(LLM.hasKey() ? `${LLM.providerLabel()} connected. Kāhyo will now extract Footsteps with AI.` : 'No-AI mode. Footsteps are split by sentence.', 'ok');
       });
     });
     $('#settings-clear').addEventListener('click', () => {
@@ -2964,7 +3658,7 @@
     document.querySelectorAll('[data-auth]').forEach((b) => b.classList.toggle('on', b.dataset.auth === mode));
     document.querySelectorAll('#auth-form [data-for]').forEach((el) => (el.hidden = !el.dataset.for.split(' ').includes(mode)));
     const words = {
-      login: ['Welcome to Kahyo', 'Log in to keep your Journeys in your account, on every device.', 'Log in'],
+      login: ['Welcome to Kāhyo', 'Log in to keep your Journeys in your account, on every device.', 'Log in'],
       signup: ['Make your account', 'Free during the beta. Your Journeys stay private to you.', 'Create account'],
       reset: ['Reset your password', 'We will email you a link to pick a new one.', 'Send the link'],
       newpass: ['Pick a new password', 'You are logged in. Choose the password you will use from now on.', 'Save password'],
@@ -2978,6 +3672,9 @@
   }
 
   function showAuth(mode = 'login', msg, kind) {
+    const r = Account.remembered();
+    $('#auth-remember').checked = r.remember;
+    if (r.email && !$('#auth-email').value) $('#auth-email').value = r.email;
     freezeMic();
     journey = null;
     document.body.classList.remove('view-home', 'view-journey');
@@ -2989,7 +3686,7 @@
     $('#account-menu').hidden = true;
     setAuthMode(mode);
     if (msg) authMsg(msg, kind);
-    document.title = 'Kahyo · Log in';
+    document.title = 'Kāhyo · Log in';
     setTimeout(() => (mode === 'signup' ? $('#auth-name') : mode === 'newpass' ? $('#auth-pass') : $('#auth-email')).focus(), 30);
   }
 
@@ -3001,10 +3698,13 @@
     authMsg('');
     try {
       if (authMode === 'login') {
+        Account.setRemember($('#auth-remember').checked, email);
         await Account.logIn(email, pass);
         await enterAccount(Account.user());
       } else if (authMode === 'signup') {
-        const r = await Account.signUp($('#auth-name').value.trim(), email, pass);
+        if (!$('#auth-terms').checked) throw new Error('Please agree to the Terms and Conditions to sign up.');
+        Account.setRemember(true, email);
+        const r = await Account.signUp($('#auth-name').value.trim(), email, pass, true);
         if (r.user) await enterAccount(r.user);
         else {
           setAuthMode('login');
@@ -3119,7 +3819,7 @@
   }
 
   // Accounts are on when the server has Supabase set up (the beta site). Without it,
-  // Kahyo works as before: Journeys live in this browser.
+  // Kāhyo works as before: Journeys live in this browser.
   async function startAccounts() {
     accountsOn = await Account.config();
     if (!accountsOn) return route();
@@ -3132,19 +3832,14 @@
     const user = Account.user();
     if (!user) return showAuth('login');
     await enterAccount(user);
-    if (link && link.type === 'signup') setStatus('Your email is confirmed. Welcome to Kahyo.');
+    if (link && link.type === 'signup') setStatus('Your email is confirmed. Welcome to Kāhyo.');
   }
 
   // ---------- init ----------
 
   function init() {
     migrate();
-    $('#legend').innerHTML =
-      '<span class="legend-geo">On course climbs at 35° · the line turns by its direction · line length = magnitude · circle size = intensity · click a link to delete it</span>' +
-      Object.values(EDGE_TYPES)
-        .map((t, i) => `<span><i class="line ${Object.keys(EDGE_TYPES)[i]}" style="--c:${t.color}"></i>${t.label}</span>`)
-        .join('') +
-      '<span><i class="ring over"></i>Off course</span><span><i class="ring wander"></i>Wandering or drifting</span><span><i class="ring branch"></i>Side path (fades as it opens wide)</span><span><i class="ring heavy"></i>Jump</span><span><i class="ring broken"></i>Trait break</span>';
+    $('#legend').innerHTML = WORDWALK_LEGEND;
     if (!SR) $('#mic-note').textContent = 'Voice needs Chrome or Edge. Typing works everywhere.';
     let mode = 'write';
     try {

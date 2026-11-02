@@ -1,4 +1,4 @@
-/* Kahyo theme. Light: white and greys with deep purple ink. Dark: deep violet with yellow ink.
+/* Kāhyo theme. Light: white and greys with deep purple ink. Dark: deep violet with yellow ink.
    The brand orange (#FD3A0A) from the logo is the action colour in both. */
 :root,
 :root[data-theme='light'] {
@@ -151,6 +151,13 @@ select:focus, input:focus, textarea:focus { outline: none; border-color: var(--h
   display: flex; flex-direction: column; min-width: 210px; box-shadow: 0 12px 30px rgba(20, 10, 40, 0.18);
 }
 .menu[hidden] { display: none; }
+#auth-form label.auth-check { display: flex; flex-direction: row; align-items: center; gap: 8px; font-weight: 500; }
+#auth-form label.auth-check[hidden] { display: none; }
+#auth-form label.auth-check input { width: 16px; height: 16px; min-width: 0; padding: 0; margin: 0; flex: none; accent-color: var(--brand); }
+#auth-form label.auth-check span { flex: 1; }
+.auth-check a { color: var(--brand); }
+.sample-wrap { position: relative; display: inline-block; }
+.sample-menu { right: 0; top: 44px; min-width: 300px; }
 .menu button { background: transparent; border: 0; text-align: left; padding: 8px 12px; }
 .menu button:hover { background: var(--card2); }
 body.view-home .journey-only { display: none; }

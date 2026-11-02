@@ -3,12 +3,12 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { MODELS, getModel, publicModels } = require('../server/models/index.js');
 
-test('four models, Wordwalk live and the rest coming soon', () => {
+test('four models, all live with an engine and prompts', () => {
   assert.deepStrictEqual(MODELS.map((m) => m.id), ['wordwalk', 'rhyme', 'reason', 'juris']);
-  assert.strictEqual(getModel('wordwalk').status, 'live');
-  for (const id of ['rhyme', 'reason', 'juris']) {
-    assert.strictEqual(getModel(id).status, 'coming-soon');
-    assert.strictEqual(getModel(id).engine, null);
+  for (const m of MODELS) {
+    assert.strictEqual(m.status, 'live');
+    assert.ok(m.engine && typeof m.engine.score === 'function', m.id);
+    assert.ok(m.tasks && typeof m.tasks.extract === 'function' && typeof m.tasks.draft === 'function', m.id);
   }
 });
 
@@ -41,6 +41,8 @@ test('the Worker routes by model', async () => {
   assert.strictEqual(list.models.length, 4);
   const scored = await (await call({ op: 'score', footsteps: [] })).json();
   assert.ok(scored.metrics && scored.info);
-  const soon = await call({ op: 'score', nsmm: 'rhyme', footsteps: [] });
-  assert.strictEqual(soon.status, 409);
+  const rhyme = await (await call({ op: 'score', nsmm: 'rhyme', footsteps: [] })).json();
+  assert.ok(rhyme.metrics && Array.isArray(rhyme.notes));
+  const placed = await (await call({ op: 'place', nsmm: 'reason', text: 'Method: we surveyed 40 schools' })).json();
+  assert.strictEqual(placed.phase, 'Methodology');
 });

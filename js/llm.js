@@ -1,9 +1,9 @@
 // AI client. Works with Google Gemini or any OpenAI-compatible chat API (Groq,
-// OpenAI, OpenRouter, or a custom base URL). The prompts live on Kahyo's server:
+// OpenAI, OpenRouter, or a custom base URL). The prompts live on Kāhyo's server:
 // the app sends a task name and story data, the server relays it to the provider.
 // Keys live only in this browser's localStorage; the server uses one per call and never stores it.
 // Embeddings come from Gemini (the main key, or a separate embedding key when the
-// chat provider has no embeddings, like Groq); without one Kahyo uses offline ones.
+// chat provider has no embeddings, like Groq); without one Kāhyo uses offline ones.
 
 (function (root) {
   const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/models/';
@@ -62,9 +62,9 @@
     return status === 503 || status === 529 || /high demand|overloaded|unavailable|try again later/i.test(msg || '');
   }
 
-  // Runs one AI task on Kahyo's server, which holds the prompts and calls the
+  // Runs one AI task on Kāhyo's server, which holds the prompts and calls the
   // writer's provider with their key (sent for this call only, never stored).
-  async function run(task, data) {
+  async function run(task, data, nsmm) {
     if (!hasKey()) throw new Error('No AI key set. Open AI config to add one.');
     const s = settings();
     let res;
@@ -72,14 +72,14 @@
       res = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Kahyo-Key': s.apiKey },
-        body: JSON.stringify({ task, data, provider: provider(), model: s.model || '', baseUrl: s.baseUrl || '' }),
+        body: JSON.stringify({ task, data, nsmm: nsmm || undefined, provider: provider(), model: s.model || '', baseUrl: s.baseUrl || '' }),
       });
     } catch {
-      throw new Error('Kahyo could not reach its server. Check your connection and try again.');
+      throw new Error('Kāhyo could not reach its server. Check your connection and try again.');
     }
     const out = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const err = new Error(out.error || `Kahyo's server said ${res.status}.`);
+      const err = new Error(out.error || `Kāhyo's server said ${res.status}.`);
       err.status = res.status;
       throw err;
     }
@@ -88,7 +88,7 @@
     return out.result;
   }
 
-  // Embeddings go straight to Gemini: they carry no Kahyo maths.
+  // Embeddings go straight to Gemini: they carry no Kāhyo maths.
   async function gemini(model, method, body, key) {
     if (!key) throw new Error('No Gemini key set. Open AI config to add one.');
     for (let i = 0; ; i++) {

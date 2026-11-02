@@ -1,9 +1,9 @@
-// Reason · definition (coming soon: no engine or prompts yet)
+// Reason · definition 
 
 export default {
   id: 'reason',
   name: 'Reason',
-  status: 'coming-soon',
+  status: 'live',
   for: 'Articles, papers and theses',
   flow: 'Runs left to right through Introduction, Literature, Methodology, Results & Inference and Conclusion.',
 
@@ -20,7 +20,19 @@ export default {
     { name: 'Conclusion', means: 'The answer and what follows from it.' },
   ],
 
-  footstep: 'To define.',
-  signals: 'To define: what on course, off topic and a missing step mean in a study.',
-  notes: 'To define.',
+  footstep: [
+    { field: 'event', means: 'One point: a question, source, method step, result or inference.' },
+    { field: 'phase', means: 'Which of the five phases it belongs to.' },
+    { field: 'role', means: 'main (the phase\'s statement, on the line) or work (beneath it).' },
+    { field: 'source', means: 'The citation or source, for what is already known.' },
+    { field: 'seeds', means: 'Links: a result relies on the method it comes from.' },
+    { field: 'intensity', means: 'How much the point matters to the argument, 0 to 1.' },
+  ],
+  signals: [
+    { name: 'Direction', means: 'How far a point strays from its phase (main points from the spine): on topic, loose, drifting or off topic. Tight at the Conclusion.' },
+    { name: 'Answer', means: 'How far the Conclusion sits from the question in the Introduction.' },
+    { name: 'Intent vector', means: 'A lot in a strange direction is unplanned work: a side path.' },
+    { name: 'Structure', means: 'Empty phases, findings without a method, literature without a source.' },
+  ],
+  notes: ['Outside the plan', 'Off topic', 'Conclusion drifts from the question', 'Phase is empty', 'Finding without a method', 'Source missing', 'Same point twice', 'May be two points'],
 };
