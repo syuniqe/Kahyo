@@ -9,11 +9,11 @@
   "preview_urls": true,
   // Branch builds run `wrangler preview`, which needs this block (it can stay empty).
   "previews": {},
-  // Accounts (Supabase). Both are public values: the anon key only works through
-  // row level security (supabase/schema.sql). Never put the service_role key here.
+  // Accounts (Supabase). Both are public values: the publishable key only works through
+  // row level security (supabase/schema.sql). Never put the secret (service_role) key here.
   "vars": {
     "SUPABASE_URL": "https://rsenwtbkvtjmfkfkzlbj.supabase.co",
-    "SUPABASE_ANON_KEY": ""
+    "SUPABASE_ANON_KEY": "sb_publishable_ECjm_iXoHxNkmx5pcL580g_-Ba7gtb5"
   },
   "assets": {
     "directory": "./dist",

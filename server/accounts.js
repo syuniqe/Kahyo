@@ -31,8 +31,10 @@ async function supa(env, path, { method = 'GET', token, body, headers = {} } = {
   const res = await fetch(env.SUPABASE_URL.replace(/\/$/, '') + path, {
     method,
     headers: {
+      // Works with the new publishable key (sb_publishable_…) and the older anon key:
+      // the key goes in apikey; Authorization only carries a signed-in person's token.
       apikey: env.SUPABASE_ANON_KEY,
-      Authorization: 'Bearer ' + (token || env.SUPABASE_ANON_KEY),
+      ...(token ? { Authorization: 'Bearer ' + token } : {}),
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...headers,
     },
