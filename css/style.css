@@ -590,3 +590,41 @@ dialog label[hidden] { display: none; }
 #undo[hidden] { display: none; }
 .rejoin-pick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; width: 100%; }
 .rejoin-pick select { flex: 1; min-width: 0; }
+
+/* accounts (beta) */
+body.view-auth .journey-only, body.view-auth #settings-btn, body.view-auth #mode-badge { display: none; }
+.auth[hidden] { display: none; }
+.auth { flex: 1; overflow: auto; display: grid; place-items: center; padding: 40px 16px; }
+.auth-card { width: 100%; max-width: 400px; background: var(--card); border: 1px solid var(--border2-solid); border-radius: 24px; padding: 30px 28px 22px; text-align: center; }
+.auth-mark { width: 56px; height: 56px; }
+.auth-card h1 { margin: 10px 0 4px; font-size: 26px; color: var(--head); }
+.auth-card > p { margin: 0 0 18px; }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; background: var(--card2); border-radius: 99px; margin-bottom: 16px; }
+.auth-tabs button { border: 0; background: transparent; border-radius: 99px; padding: 8px; font-weight: 600; color: var(--muted); }
+.auth-tabs button.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 4px rgba(20, 10, 40, 0.12); }
+.auth-card.reset .auth-tabs, .auth-card.newpass .auth-tabs { display: none; }
+#auth-form { display: flex; flex-direction: column; gap: 12px; text-align: left; }
+#auth-form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+#auth-form input { width: 100%; box-sizing: border-box; border-radius: 12px; font-size: 15px; }
+#auth-form p { margin: -6px 0 0; }
+#auth-form [hidden] { display: none; }
+#auth-go { margin-top: 4px; padding: 11px; }
+.auth-msg { min-height: 0; font-size: 13px; margin: 0; }
+.auth-msg:empty { display: none; }
+.auth-msg.err { color: var(--red); }
+.auth-msg.ok { color: var(--green); }
+button.link { background: none; border: 0; padding: 4px; color: var(--muted); text-decoration: underline; font-size: 13px; align-self: center; }
+button.link:hover { color: var(--ink); }
+.auth-foot { margin: 18px 0 0; }
+.account-btn { display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px; max-width: 200px; }
+.account-btn[hidden] { display: none; }
+.account-btn #account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avatar-dot { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--brand); color: #fff; font-weight: 700; font-size: 13px; }
+.account-who { display: flex; flex-direction: column; padding: 8px 12px 10px; border-bottom: 1px solid var(--border2-solid); margin-bottom: 4px; overflow-wrap: anywhere; }
+.sync { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.sync[hidden] { display: none; }
+.sync[data-state='offline'] { color: var(--amber); }
+.danger-zone { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--border2-solid); }
+.danger-zone h3 { margin: 0 0 4px; font-size: 15px; }
+button.danger { color: var(--red); }
+@media (max-width: 640px) { .account-btn #account-name { display: none; } .account-btn { padding: 4px; } }

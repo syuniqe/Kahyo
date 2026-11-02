@@ -2,9 +2,13 @@
 
 (function () {
   const $ = (sel) => document.querySelector(sel);
-  const INDEX_KEY = 'kahyo.journeys';
+  // Journeys are cached in this browser under NS: 'kahyo.' for this device's own
+  // Journeys, 'kahyo.u.<id>.' for a logged-in account (its copy lives in the cloud).
+  const DEVICE_NS = 'kahyo.';
+  let NS = DEVICE_NS;
+  const indexKey = (ns = NS) => ns + 'journeys';
   const LEGACY_KEY = 'kahyo.journey';
-  const jKey = (id) => 'kahyo.j.' + id;
+  const jKey = (id, ns = NS) => ns + 'j.' + id;
   // Links between Footsteps. A cause link is stored once (from the cause to its
   // consequence); the consequence side is shown on the other Footstep automatically.
   const EDGE_TYPES = {
@@ -94,9 +98,9 @@
     return j;
   }
 
-  function listIds() {
+  function listIds(ns = NS) {
     try {
-      return JSON.parse(localStorage.getItem(INDEX_KEY)) || [];
+      return JSON.parse(localStorage.getItem(indexKey(ns))) || [];
     } catch {
       return [];
     }
@@ -104,13 +108,13 @@
 
   function setIds(ids) {
     try {
-      localStorage.setItem(INDEX_KEY, JSON.stringify(ids));
+      localStorage.setItem(indexKey(), JSON.stringify(ids));
     } catch {}
   }
 
   // The first version kept a single Journey. Move it into the library.
   function migrate() {
-    if (localStorage.getItem(INDEX_KEY)) return;
+    if (localStorage.getItem(indexKey(DEVICE_NS))) return;
     const ids = [];
     try {
       const old = normalize(JSON.parse(localStorage.getItem(LEGACY_KEY)));
@@ -123,31 +127,176 @@
     setIds(ids);
   }
 
-  function readJourney(id) {
+  function readJourney(id, ns = NS) {
     try {
-      return normalize(JSON.parse(localStorage.getItem(jKey(id))));
+      return normalize(JSON.parse(localStorage.getItem(jKey(id, ns))));
     } catch {
       return null;
     }
   }
 
   // Embeddings are rounded so many Journeys fit in the browser's storage.
+  const rounded = (k, v) => (k === 'embedding' && Array.isArray(v) ? v.map((x) => Math.round(x * 1e4) / 1e4) : v);
+
+  function cache(j) {
+    localStorage.setItem(jKey(j.id), JSON.stringify(j, rounded));
+    const ids = listIds();
+    if (!ids.includes(j.id)) setIds([j.id, ...ids]);
+  }
+
   function save() {
     if (!journey) return;
     journey.updated = Date.now();
     try {
-      localStorage.setItem(jKey(journey.id), JSON.stringify(journey, (k, v) => (k === 'embedding' && Array.isArray(v) ? v.map((x) => Math.round(x * 1e4) / 1e4) : v)));
-      const ids = listIds();
-      if (!ids.includes(journey.id)) setIds([journey.id, ...ids]);
+      cache(journey);
     } catch (e) {
       console.warn('Could not save journey', e);
-      setStatus('Browser storage is full. Export and delete an old Journey to keep saving.', 'err');
+      if (!account) setStatus('Browser storage is full. Export and delete an old Journey to keep saving.', 'err');
     }
+    if (account) markDirty(journey.id, journey);
   }
 
   function deleteJourney(id) {
     localStorage.removeItem(jKey(id));
     setIds(listIds().filter((x) => x !== id));
+    if (account) {
+      pending.dirty.delete(id);
+      pending.gone.add(id);
+      keepPending();
+      schedulePush(0);
+    }
+  }
+
+  // ---------- account: Journeys saved to the cloud, cached here ----------
+  // Every change is cached at once and sent a moment later. Changes that could not be
+  // sent (offline, a closed tab) stay listed under NS + 'pending' and go on the next try.
+
+  let account = null; // the logged-in person, or null on this device's own library
+  const pending = { dirty: new Set(), gone: new Set() };
+  const unsent = new Map(); // id → the Journey still to send (when the cache is full)
+  let pushTimer = null;
+  let pushing = null;
+
+  function keepPending() {
+    try {
+      localStorage.setItem(NS + 'pending', JSON.stringify({ dirty: [...pending.dirty], gone: [...pending.gone] }));
+    } catch {}
+  }
+
+  function loadPending() {
+    pending.dirty.clear();
+    pending.gone.clear();
+    try {
+      const p = JSON.parse(localStorage.getItem(NS + 'pending')) || {};
+      (p.dirty || []).forEach((id) => pending.dirty.add(id));
+      (p.gone || []).forEach((id) => pending.gone.add(id));
+    } catch {}
+  }
+
+  function markDirty(id, j) {
+    pending.dirty.add(id);
+    pending.gone.delete(id);
+    unsent.set(id, j);
+    keepPending();
+    schedulePush();
+  }
+
+  function schedulePush(wait = 1200) {
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(push, wait);
+  }
+
+  // What the Home card shows, so the list can load without every Journey's data.
+  function cardSummary(j) {
+    return {
+      main: j.footsteps.filter((f) => f.thread === 'main').length,
+      branches: j.footsteps.filter((f) => f.thread === 'branch').length,
+      notes: j.alerts.filter((a) => a.open).length,
+      plannedLength: j.plannedLength,
+      stage: j.stage,
+      characters: j.characters.map((c) => c.name).slice(0, 4),
+    };
+  }
+
+  function setSync(state, msg) {
+    const el = $('#sync');
+    if (!el) return;
+    el.hidden = !account;
+    el.dataset.state = state;
+    el.textContent = { saving: 'Saving…', saved: 'Saved', offline: 'Not synced' }[state] || '';
+    el.title = msg || { saving: 'Saving to your account', saved: 'Saved to your account', offline: 'Saved on this device. Kahyo will sync it to your account when it can.' }[state];
+  }
+
+  async function push() {
+    if (!account) return;
+    if (pushing) return pushing.then(() => schedulePush(0));
+    if (!pending.dirty.size && !pending.gone.size) return;
+    setSync('saving');
+    pushing = (async () => {
+      const who = account;
+      for (const id of [...pending.gone]) {
+        await Account.cloud.remove(id);
+        pending.gone.delete(id);
+      }
+      for (const id of [...pending.dirty]) {
+        const j = unsent.get(id) || readJourney(id);
+        if (j) await Account.cloud.put(JSON.parse(JSON.stringify(j, rounded)), cardSummary(j));
+        if (account !== who) return;
+        pending.dirty.delete(id);
+        unsent.delete(id);
+      }
+    })()
+      .then(() => setSync('saved'))
+      .catch((e) => {
+        console.warn('Could not sync', e);
+        if (e.status === 401) return signedOut();
+        setSync('offline', e.offline ? undefined : 'Could not save to your account: ' + e.message + ' Kahyo will try again.');
+        schedulePush(15000);
+      })
+      .finally(() => {
+        keepPending();
+        pushing = null;
+      });
+    return pushing;
+  }
+
+  // Bring this browser's cache in line with the account: newer copies come down,
+  // Journeys deleted on another device go, and unsent changes go up.
+  async function pull() {
+    const cards = await Account.cloud.list();
+    const have = new Set(cards.map((c) => c.id));
+    for (const c of cards) {
+      if (pending.dirty.has(c.id) || pending.gone.has(c.id)) continue;
+      const mine = readJourney(c.id);
+      if (mine && mine.updated >= c.updated) continue;
+      const j = normalize(await Account.cloud.get(c.id));
+      if (j) {
+        j.updated = c.updated;
+        try {
+          cache(j);
+        } catch (e) {
+          console.warn('Could not cache', e);
+        }
+      }
+    }
+    listIds()
+      .filter((id) => !have.has(id) && !pending.dirty.has(id))
+      .forEach((id) => {
+        localStorage.removeItem(jKey(id));
+        setIds(listIds().filter((x) => x !== id));
+      });
+    const order = cards.map((c) => c.id).filter((id) => listIds().includes(id));
+    setIds([...listIds().filter((id) => !order.includes(id)), ...order]);
+    push();
+  }
+
+  function useAccount(user) {
+    account = user;
+    NS = user ? `kahyo.u.${user.id}.` : DEVICE_NS;
+    unsent.clear();
+    loadPending();
+    document.body.classList.toggle('signed-in', Boolean(user));
+    renderAccount();
   }
 
   function saveSettings(patch) {
@@ -1175,7 +1324,7 @@
   }
 
   function renderHome() {
-    const list = listIds().map(readJourney).filter(Boolean).sort((a, b) => b.updated - a.updated);
+    const list = listIds().map((id) => readJourney(id)).filter(Boolean).sort((a, b) => b.updated - a.updated);
     const el = $('#journey-list');
     if (!list.length) {
       el.innerHTML = `<div class="empty-home"><img src="assets/kahyo-mark-256.png" alt="" /><p>No Journeys yet.</p><p class="muted">Start a new one and speak your first idea, or open the sample story to see how Kahyo maps it.</p></div>`;
@@ -1206,8 +1355,9 @@
   function showHome() {
     freezeMic();
     journey = null;
-    document.body.classList.remove('view-journey');
+    document.body.classList.remove('view-journey', 'view-auth');
     document.body.classList.add('view-home');
+    $('#auth').hidden = true;
     $('#home').hidden = false;
     $('#journey-view').hidden = true;
     $('#menu').hidden = true;
@@ -1221,8 +1371,9 @@
     selectedId = null;
     charView = null;
     toggleCharPop(false);
-    document.body.classList.remove('view-home');
+    document.body.classList.remove('view-home', 'view-auth');
     document.body.classList.add('view-journey');
+    $('#auth').hidden = true;
     $('#home').hidden = true;
     $('#journey-view').hidden = false;
     renderAll({ fit: true });
@@ -1241,10 +1392,23 @@
   }
 
   function route() {
+    if (accountsOn && !account) return showAuth('login');
     const m = /^#\/j\/(.+)$/.exec(location.hash);
-    const j = m && readJourney(decodeURIComponent(m[1]));
-    if (j) openJourney(j);
-    else showHome();
+    const id = m && decodeURIComponent(m[1]);
+    const j = id && readJourney(id);
+    if (j) return openJourney(j);
+    if (id && account)
+      // Not cached here yet: fetch it from the account.
+      return Account.cloud
+        .get(id)
+        .then((data) => {
+          const k = normalize(data);
+          if (!k) return showHome();
+          cache(k);
+          if (location.hash === m[0]) openJourney(k);
+        })
+        .catch(() => showHome());
+    showHome();
   }
 
   function go(id) {
@@ -2768,6 +2932,209 @@
     $('#settings').showModal();
   }
 
+
+  // ---------- account screens ----------
+
+  let accountsOn = false;
+  let authMode = 'login';
+
+  function renderAccount() {
+    const u = account;
+    $('#account-btn').hidden = !u;
+    $('#sync').hidden = !u;
+    $('#home-where').textContent = u ? 'Saved to your account.' : 'Saved in this browser.';
+    if (!u) return;
+    const name = u.name || u.email.split('@')[0];
+    $('#account-initial').textContent = name.trim().charAt(0).toUpperCase() || '?';
+    $('#account-name').textContent = name;
+    $('#am-name').textContent = name;
+    $('#am-email').textContent = u.email;
+  }
+
+  function authMsg(text, kind = 'err') {
+    const el = $('#auth-msg');
+    el.textContent = text || '';
+    el.className = 'auth-msg ' + kind;
+  }
+
+  function setAuthMode(mode) {
+    authMode = mode;
+    const card = $('.auth-card');
+    card.className = 'auth-card ' + mode;
+    document.querySelectorAll('[data-auth]').forEach((b) => b.classList.toggle('on', b.dataset.auth === mode));
+    document.querySelectorAll('#auth-form [data-for]').forEach((el) => (el.hidden = !el.dataset.for.split(' ').includes(mode)));
+    const words = {
+      login: ['Welcome to Kahyo', 'Log in to keep your Journeys in your account, on every device.', 'Log in'],
+      signup: ['Make your account', 'Free during the beta. Your Journeys stay private to you.', 'Create account'],
+      reset: ['Reset your password', 'We will email you a link to pick a new one.', 'Send the link'],
+      newpass: ['Pick a new password', 'You are logged in. Choose the password you will use from now on.', 'Save password'],
+    }[mode];
+    $('#auth-title').textContent = words[0];
+    $('#auth-sub').textContent = words[1];
+    $('#auth-go').textContent = words[2];
+    $('#auth-pass-label').textContent = mode === 'newpass' ? 'New password' : 'Password';
+    $('#auth-pass').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+    authMsg('');
+  }
+
+  function showAuth(mode = 'login', msg, kind) {
+    freezeMic();
+    journey = null;
+    document.body.classList.remove('view-home', 'view-journey');
+    document.body.classList.add('view-auth');
+    $('#home').hidden = true;
+    $('#journey-view').hidden = true;
+    $('#auth').hidden = false;
+    $('#menu').hidden = true;
+    $('#account-menu').hidden = true;
+    setAuthMode(mode);
+    if (msg) authMsg(msg, kind);
+    document.title = 'Kahyo · Log in';
+    setTimeout(() => (mode === 'signup' ? $('#auth-name') : mode === 'newpass' ? $('#auth-pass') : $('#auth-email')).focus(), 30);
+  }
+
+  async function submitAuth() {
+    const email = $('#auth-email').value.trim();
+    const pass = $('#auth-pass').value;
+    const btn = $('#auth-go');
+    btn.disabled = true;
+    authMsg('');
+    try {
+      if (authMode === 'login') {
+        await Account.logIn(email, pass);
+        await enterAccount(Account.user());
+      } else if (authMode === 'signup') {
+        const r = await Account.signUp($('#auth-name').value.trim(), email, pass);
+        if (r.user) await enterAccount(r.user);
+        else {
+          setAuthMode('login');
+          authMsg('Check ' + email + ' for a link to confirm your account, then log in here.', 'ok');
+        }
+      } else if (authMode === 'reset') {
+        await Account.reset(email);
+        authMsg('If ' + email + ' has an account, a reset link is on its way. Open it on this device.', 'ok');
+      } else if (authMode === 'newpass') {
+        await Account.update({ password: pass });
+        await enterAccount(Account.user());
+        setStatus('Your new password is saved.');
+      }
+    } catch (e) {
+      authMsg(e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // Logged in: switch to the account's library and sync it. The beta starts clean:
+  // Journeys kept in this browser before (the main site's) are not brought over.
+  async function enterAccount(user) {
+    useAccount(user);
+    $('#auth').hidden = true;
+    $('#auth-pass').value = '';
+    document.body.classList.remove('view-auth');
+    try {
+      await pull();
+    } catch (e) {
+      console.warn('Could not load the account', e);
+      if (e.status === 401) return signedOut();
+      setSync('offline', 'Could not reach your account: ' + e.message);
+    }
+    route();
+  }
+
+  function signedOut(msg = 'Your session ended. Please log in again.') {
+    useAccount(null);
+    if (accountsOn) showAuth('login', msg);
+    else route();
+  }
+
+  function openAccountSettings() {
+    $('#account-menu').hidden = true;
+    $('#as-email').textContent = account.email;
+    $('#as-name').value = account.name || '';
+    $('#as-pass').value = '';
+    $('#as-msg').textContent = '';
+    $('#account-settings').showModal();
+  }
+
+  function bindAccount() {
+    document.querySelectorAll('[data-auth]').forEach((b) => b.addEventListener('click', () => setAuthMode(b.dataset.auth)));
+    $('#auth-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      submitAuth();
+    });
+    $('#auth-forgot').addEventListener('click', () => setAuthMode('reset'));
+    $('#auth-back').addEventListener('click', () => setAuthMode('login'));
+    $('#account-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      $('#account-menu').hidden = !$('#account-menu').hidden;
+    });
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#account-menu, #account-btn')) $('#account-menu').hidden = true;
+    });
+    $('#am-settings').addEventListener('click', openAccountSettings);
+    $('#am-logout').addEventListener('click', async () => {
+      $('#account-menu').hidden = true;
+      if (pending.dirty.size || pending.gone.size) {
+        await push();
+        if ((pending.dirty.size || pending.gone.size) && !confirm('Some changes have not reached your account yet. Log out anyway? They stay in this browser and sync next time you log in here.')) return;
+      }
+      await Account.logOut();
+      signedOut('You are logged out.');
+      authMsg('You are logged out.', 'ok');
+    });
+    $('#as-save').addEventListener('click', async () => {
+      const msg = $('#as-msg');
+      const patch = { name: $('#as-name').value.trim() };
+      if ($('#as-pass').value) patch.password = $('#as-pass').value;
+      try {
+        useAccount(await Account.update(patch));
+        $('#as-pass').value = '';
+        msg.className = 'auth-msg ok';
+        msg.textContent = patch.password ? 'Saved. Use the new password next time you log in.' : 'Saved.';
+      } catch (e) {
+        msg.className = 'auth-msg err';
+        msg.textContent = e.message;
+      }
+    });
+    $('#as-delete').addEventListener('click', async () => {
+      const typed = prompt(`This deletes your account and all its Journeys for good.\nType DELETE to confirm.`);
+      if (typed !== 'DELETE') return;
+      try {
+        const who = account.id;
+        await Account.deleteAccount();
+        listIds().forEach((id) => localStorage.removeItem(jKey(id)));
+        ['journeys', 'pending'].forEach((k) => localStorage.removeItem(`kahyo.u.${who}.${k}`));
+        $('#account-settings').close();
+        signedOut('Your account is deleted.');
+        authMsg('Your account and its Journeys are deleted.', 'ok');
+      } catch (e) {
+        $('#as-msg').className = 'auth-msg err';
+        $('#as-msg').textContent = e.message;
+      }
+    });
+    // Last changes before the tab closes; anything left over goes next time.
+    addEventListener('pagehide', () => account && (pending.dirty.size || pending.gone.size) && push());
+    addEventListener('online', () => account && schedulePush(0));
+  }
+
+  // Accounts are on when the server has Supabase set up (the beta site). Without it,
+  // Kahyo works as before: Journeys live in this browser.
+  async function startAccounts() {
+    accountsOn = await Account.config();
+    if (!accountsOn) return route();
+    const link = await Account.fromLink();
+    if (link && link.error) return showAuth('login', link.error);
+    if (link && link.type === 'recovery') {
+      useAccount(link.user);
+      return showAuth('newpass');
+    }
+    const user = Account.user();
+    if (!user) return showAuth('login');
+    await enterAccount(user);
+    if (link && link.type === 'signup') setStatus('Your email is confirmed. Welcome to Kahyo.');
+  }
+
   // ---------- init ----------
 
   function init() {
@@ -2788,7 +3155,11 @@
       if (localStorage.getItem('kahyo.pane') === 'closed') document.body.classList.add('pane-closed');
     } catch {}
     bind();
-    route();
+    bindAccount();
+    startAccounts().catch((e) => {
+      console.warn(e);
+      route();
+    });
     document.fonts?.ready.then(() => journey && renderGraph());
   }
 

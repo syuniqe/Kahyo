@@ -34,6 +34,7 @@
       <button data-mode="write" title="Calm view for writing">Write</button>
       <button data-mode="inspect" title="Show the numbers, sliders and threshold">Inspect</button>
     </div>
+    <span id="sync" class="sync" hidden></span>
     <span id="mode-badge" class="badge"></span>
     <button id="theme-btn" class="ghost theme-btn" aria-label="Switch light or dark mode" title="Light / dark"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2v16a8 8 0 0 1 0-16z"/></svg></button>
     <button id="settings-btn" class="ghost">AI config</button>
@@ -44,15 +45,45 @@
       <button id="m-settings">AI config</button>
       <button id="m-learn">Learn</button>
     </div>
+    <button id="account-btn" class="ghost account-btn" aria-haspopup="true" hidden><span class="avatar-dot" id="account-initial"></span><span id="account-name"></span></button>
+    <div id="account-menu" class="menu account-menu" hidden>
+      <div class="account-who"><strong id="am-name"></strong><span class="small muted" id="am-email"></span></div>
+      <button id="am-settings">Account settings</button>
+      <button id="am-logout">Log out</button>
+    </div>
     <input id="import-file" type="file" hidden />
   </header>
+
+  <!-- Accounts (beta): log in, sign up, reset password -->
+  <main id="auth" class="auth" hidden>
+    <div class="auth-card">
+      <img class="auth-mark" src="assets/kahyo-mark-256.png" alt="" />
+      <h1 id="auth-title">Welcome to Kahyo</h1>
+      <p class="muted" id="auth-sub">Log in to keep your Journeys in your account, on every device.</p>
+      <div class="auth-tabs" role="tablist">
+        <button type="button" data-auth="login" role="tab">Log in</button>
+        <button type="button" data-auth="signup" role="tab">Sign up</button>
+      </div>
+      <form id="auth-form" novalidate>
+        <label data-for="signup">Your name <input id="auth-name" autocomplete="name" maxlength="80" /></label>
+        <label data-for="login signup reset">Email <input id="auth-email" type="email" autocomplete="email" required /></label>
+        <label data-for="login signup newpass"><span id="auth-pass-label">Password</span> <input id="auth-pass" type="password" autocomplete="current-password" minlength="8" required /></label>
+        <p class="small muted" data-for="signup newpass">At least 8 characters.</p>
+        <p id="auth-msg" class="auth-msg" role="status"></p>
+        <button id="auth-go" class="primary" type="submit">Log in</button>
+        <button id="auth-forgot" class="link" type="button" data-for="login">Forgot your password?</button>
+        <button id="auth-back" class="link" type="button" data-for="reset">Back to log in</button>
+      </form>
+      <p class="small muted auth-foot">Kahyo beta · your Journeys are private to your account.</p>
+    </div>
+  </main>
 
   <!-- Home: every Journey saved in this browser -->
   <main id="home" class="home">
     <div class="home-head">
       <div>
         <h1>Your Journeys</h1>
-        <p class="muted">Saved in this browser. Each Journey is one story, planned around 50 to 100 Footsteps.</p>
+        <p class="muted"><span id="home-where">Saved in this browser.</span> Each Journey is one story, planned around 50 to 100 Footsteps.</p>
       </div>
       <div class="actions">
         <button id="h-import" class="ghost">Import</button>
@@ -191,6 +222,23 @@
     </div>
   </dialog>
 
+  <dialog id="account-settings">
+    <h2>Account settings</h2>
+    <p class="small muted" id="as-email"></p>
+    <label>Your name <input id="as-name" maxlength="80" autocomplete="name" /></label>
+    <label>New password <span class="small muted">(leave empty to keep it)</span> <input id="as-pass" type="password" minlength="8" autocomplete="new-password" /></label>
+    <p id="as-msg" class="auth-msg" role="status"></p>
+    <div class="actions">
+      <button class="ghost" type="button" onclick="this.closest('dialog').close()">Close</button>
+      <button id="as-save" class="primary" type="button">Save</button>
+    </div>
+    <div class="danger-zone">
+      <h3>Delete account</h3>
+      <p class="small muted">Deletes your account and every Journey in it, for good. Export any Journey you want to keep first.</p>
+      <button id="as-delete" class="ghost danger" type="button">Delete my account</button>
+    </div>
+  </dialog>
+
   <dialog id="settings">
     <h2>AI config</h2>
     <p>Kahyo runs free. Without a key it works in <strong>No-AI mode</strong>: one Footstep per sentence and simple local meaning checks (it still needs internet, because Kahyo's engine runs on its server). For AI extraction, placement, stage labels and drafts, add a key from any AI provider. Keys are stored only in this browser. Kahyo's server passes each one to that provider for the one call and never keeps it.</p>
@@ -222,6 +270,7 @@
   <script src="vendor/vis-network.min.js"></script>
   <script src="js/nsmm.js"></script>
   <script src="js/llm.js"></script>
+  <script src="js/account.js"></script>
   <script src="js/sample.js"></script>
   <script src="js/app.js"></script>
 </body>

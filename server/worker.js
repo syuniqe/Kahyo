@@ -3,11 +3,14 @@
 //   POST /api/engine  { op: 'models' }                         → the model list for the picker
 //   POST /api/engine  { op: 'score' | 'stages', nsmm?, ... }   → engine results
 //   POST /api/ai      { task, data, nsmm?, provider, model, baseUrl } + header X-Kahyo-Key → { result, model }
+//   POST /api/account { op: 'config' | 'signup' | 'login' | ... }  accounts (beta, see accounts.js)
+//   POST /api/journeys { op: 'list' | 'get' | 'put' | 'delete' }  Journeys saved to the account
 // `nsmm` names the Journey's model (wordwalk when left out); `model` is the AI model.
 // Everything else is the static app in dist/. See README.md in this folder.
 
 import { getModel, publicModels } from './models/index.js';
 import { runTask } from './ai.js';
+import { account, journeys, configured } from './accounts.js';
 
 const MAX_BODY = 4 * 1024 * 1024;
 
@@ -65,6 +68,13 @@ export default {
       try {
         if (pathname === '/api/engine') return await engine(request);
         if (pathname === '/api/ai') return await ai(request);
+        if (pathname === '/api/account' || pathname === '/api/journeys') {
+          const body = await readJSON(request);
+          // The app asks first; without Supabase set up it keeps Journeys in the browser only.
+          if (body.op === 'config') return reply({ accounts: configured(env) });
+          if (!configured(env)) return reply({ error: 'Accounts are not set up on this site yet.' }, 503);
+          return reply(pathname === '/api/account' ? await account(body, request, env) : await journeys(body, request, env));
+        }
         return reply({ error: 'Not found.' }, 404);
       } catch (e) {
         // Upstream status codes (401, 429, 503…) pass through so the app can explain them.

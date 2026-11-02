@@ -30,6 +30,15 @@ Without a key the app still works in **offline mode**: one Footstep per idea, si
 
 Cloudflare Workers static assets: build command `sh build.sh`, deploy command `npx wrangler deploy` (see `wrangler.jsonc`). Every push to `main` redeploys to https://app.kahyo.workers.dev.
 
+## Beta: accounts
+
+The `beta` branch is a separate site, https://beta.kahyo.workers.dev, deployed to its own Worker (`beta`), so the main site keeps working as it is. On beta you sign up or log in (email and password, Supabase Auth), and every Journey is saved to your account and cached in the browser. Journeys saved in a browser on the main site stay there; beta starts clean.
+
+- `server/accounts.js` handles `/api/account` (sign up, log in, refresh, log out, reset password, profile, delete account) and `/api/journeys` (list, get, put, delete). The browser only talks to the Worker.
+- `supabase/schema.sql` creates the `journeys` table with row level security (each person sees only their own rows) and the `delete_my_account` function. Run it once in the Supabase SQL editor.
+- `wrangler.jsonc` sets `SUPABASE_URL` and `SUPABASE_ANON_KEY`. Without them the app falls back to browser-only Journeys.
+- In Supabase → Authentication → URL Configuration, set the Site URL to `https://beta.kahyo.workers.dev` so confirmation and reset emails link back to beta.
+
 ## The maths
 
 The ThoughtSense Engine and the NSMMs are Kahyo's IP. They live only in `server/` (run by the Cloudflare Worker, never sent to the browser) and the private maths review doc. `js/nsmm.js` is only the browser shim that asks the server to score a Journey and to list the models.
