@@ -294,11 +294,53 @@ function scoreJourney(input = {}) {
   };
 }
 
-// Where stage labels stand for a main thread of `count` Footsteps.
+// How far (as a share of the planned length) a proposed stage may sit from where
+// position alone would put it, and how many main Footsteps each stage holds at least.
+const STAGE_WINDOW = 0.1;
+const MIN_STAGE_RUN = 2;
+
+// Index of the stage that position alone gives at share f of the planned length.
+function stageAt(f) {
+  const idx = STAGE_BOUNDS.findIndex((b) => f < b);
+  return idx === -1 ? STAGES.length - 1 : idx;
+}
+
+// Turns proposed labels (the AI's reading, or labels carried over) into labels
+// that obey the stage rules:
+//   1. the story starts at Origin and moves one stage at a time (no skipping);
+//   2. a stage never goes back;
+//   3. each stage holds at least MIN_STAGE_RUN main Footsteps before the next starts;
+//   4. a label stays within STAGE_WINDOW of the planned length of its position stage.
+function constrainStages(proposed, plannedLength = DEFAULT_PLANNED_LENGTH) {
+  const count = proposed.length;
+  const span = Math.max(count, plannedLength);
+  let cur = 0;
+  let run = 0;
+  return proposed.map((label, i) => {
+    const f = (i + 0.5) / span;
+    const lo = stageAt(Math.max(0, f - STAGE_WINDOW));
+    const hi = stageAt(f + STAGE_WINDOW);
+    const asked = STAGES.indexOf(stageName(label));
+    const want = clamp(asked === -1 ? stageAt(f) : asked, lo, hi);
+    if (i > 0 && want > cur && run >= MIN_STAGE_RUN) {
+      cur += 1;
+      run = 0;
+    }
+    run += 1;
+    return STAGES[cur];
+  });
+}
+
+// Where stage labels stand for a main thread of `count` Footsteps. With `proposed`
+// labels (one per main Footstep), returns them made to obey the stage rules.
 function stagesFor(input = {}) {
   const plannedLength = clamp(Math.round(num(input.plannedLength, DEFAULT_PLANNED_LENGTH)), 1, 1000);
   const count = clamp(Math.round(num(input.count, 0)), 0, 5000);
-  return { after: stageLabelAfter(plannedLength), labels: heuristicStages(count, plannedLength) };
+  const after = stageLabelAfter(plannedLength);
+  if (Array.isArray(input.proposed) && input.proposed.length === count && count >= after) {
+    return { after, labels: constrainStages(input.proposed.map(String), plannedLength) };
+  }
+  return { after, labels: heuristicStages(count, plannedLength) };
 }
 
 export {
@@ -310,6 +352,7 @@ export {
   CRAWL,
   DEFAULT_BRANCH_SHARE,
   stageLabelAfter,
+  constrainStages,
   stageNumber,
   autoTerminancy,
   directionLimit,

@@ -79,7 +79,8 @@
     }
     const out = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const err = new Error(out.error || `Kahyo's server said ${res.status}.`);
+      const slow = res.status === 524 || res.status === 504;
+      const err = new Error(out.error || (slow ? 'The AI took too long to answer. It is probably busy or at its free-tier limit. Wait a minute and press Add again.' : `Kahyo's server said ${res.status}.`));
       err.status = res.status;
       throw err;
     }

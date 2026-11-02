@@ -888,7 +888,13 @@
         labels = plan.labels;
       }
     }
-    labels = NSMM.monotonicStages(labels);
+    if (labels !== plan.labels) {
+      try {
+        labels = (await NSMM.stages(n, journey.plannedLength, journey.nsmm, labels)).labels;
+      } catch {
+        labels = NSMM.monotonicStages(labels);
+      }
+    }
     main.forEach((f, i) => (f.stage = labels[i]));
     journey.footsteps
       .filter((f) => f.thread !== 'main')

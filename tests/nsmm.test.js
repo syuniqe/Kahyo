@@ -178,3 +178,49 @@ test('the fast whole-Journey scorer agrees with the step-by-step reference', () 
   });
   assert.ok(agree >= steps.length - 1, `${agree}/${steps.length} agree`);
 });
+
+// ---------- stage rules (constrainStages) ----------
+{
+  const { stagesFor } = require('../server/models/wordwalk/rules.js');
+  const test = require('node:test');
+  const assert = require('node:assert');
+  const order = ['Origin', 'Pandiculation', 'Maxspan', 'Convergence', 'Conclusion'];
+
+  test('stages: an AI reading that jumps from Origin to Maxspan goes through Pandiculation', () => {
+    const proposed = ['Origin', ...new Array(14).fill('Maxspan')];
+    const { labels } = stagesFor({ count: 15, plannedLength: 60, proposed });
+    assert.equal(labels[0], 'Origin');
+    assert.ok(!labels.includes('Maxspan'), labels.join(','));
+    assert.ok(labels.includes('Pandiculation'));
+  });
+
+  test('stages: never skip, never go back, each stage at least two Footsteps', () => {
+    const names = order.concat(['Climax', 'nonsense']);
+    for (let trial = 0; trial < 200; trial++) {
+      const count = 12 + (trial % 80);
+      const proposed = Array.from({ length: count }, (_, i) => names[(i * 7 + trial) % names.length]);
+      const { labels } = stagesFor({ count, plannedLength: 60, proposed });
+      assert.equal(labels.length, count);
+      assert.equal(labels[0], 'Origin');
+      let run = 0;
+      for (let i = 1; i < count; i++) {
+        const a = order.indexOf(labels[i - 1]), b = order.indexOf(labels[i]);
+        assert.ok(b === a || b === a + 1, `step ${i}: ${labels[i - 1]} → ${labels[i]}`);
+        run = b === a ? run + 1 : 0;
+        if (b === a + 1) assert.ok(i >= 2);
+      }
+    }
+  });
+
+  test('stages: Maxspan cannot start before 30% of the planned length', () => {
+    const proposed = new Array(60).fill('Maxspan');
+    const { labels } = stagesFor({ count: 60, plannedLength: 60, proposed });
+    assert.ok(labels.indexOf('Maxspan') >= 17, String(labels.indexOf('Maxspan')));
+  });
+
+  test('stages: a reading that keeps to the plan is left as it is', () => {
+    const count = 60;
+    const plan = stagesFor({ count, plannedLength: 60 }).labels;
+    assert.deepEqual(stagesFor({ count, plannedLength: 60, proposed: plan }).labels, plan);
+  });
+}
