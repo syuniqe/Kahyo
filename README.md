@@ -36,6 +36,7 @@ The `beta` branch is a separate site, https://beta.kahyo.workers.dev, deployed t
 
 - `server/accounts.js` handles `/api/account` (sign up, log in, refresh, log out, reset password, profile, delete account) and `/api/journeys` (list, get, put, delete). The browser only talks to the Worker.
 - `supabase/schema.sql` creates the `journeys` table with row level security (each person sees only their own rows) and the `delete_my_account` function. Run it once in the Supabase SQL editor.
+- `supabase/activity.sql` records traction: one row per writer per day (Footsteps added, Journeys saved; no story text), filled by a trigger on `journeys`, and the `traction_weekly` view (new, active and returning writers per week; active = 3+ Footsteps that week). Run it once after `schema.sql`, then `select * from public.traction_weekly;` in the SQL editor.
 - `wrangler.jsonc` sets `SUPABASE_URL` and `SUPABASE_ANON_KEY`. Without them the app falls back to browser-only Journeys.
 - In Supabase → Authentication → URL Configuration, set the Site URL to `https://beta.kahyo.workers.dev` so confirmation and reset emails link back to beta.
 
